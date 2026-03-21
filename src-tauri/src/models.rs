@@ -20,7 +20,7 @@ pub struct Sheet {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, sqlx::FromRow)]
 pub struct Field {
     pub id: i64,
     pub sheet_id: Option<i64>,

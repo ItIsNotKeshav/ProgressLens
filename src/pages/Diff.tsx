@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { DiffResult, StudentDiff, Snapshot, Sheet, Field } from "../types";
 import { ExternalLink } from "lucide-react";
+import { formatIST } from "../utils";
 
 export default function Diff() {
   const [searchParams] = useSearchParams();
@@ -195,8 +196,8 @@ export default function Diff() {
       {/* Main Diff Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-ink-950 relative">
         {/* Top Toolbar */}
-        <header className="h-14 shrink-0 border-b border-ink-800/60 flex items-center justify-between px-6 bg-ink-950/80 backdrop-blur z-10">
-          <div className="flex items-center gap-6">
+        <header className="h-14 shrink-0 border-b border-ink-800/60 flex items-center justify-between px-4 lg:px-6 bg-ink-950/80 backdrop-blur z-10 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-4 lg:gap-6 shrink-0 min-w-max">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-ink-400 uppercase tracking-widest">Sheet</span>
               <select
@@ -219,7 +220,7 @@ export default function Diff() {
               >
                 {snapshots.map((s) => (
                   <option key={s.id} value={s.id}>
-                    Snap {s.id} ({new Date(s.synced_at).toLocaleDateString()})
+                    Snap {s.id} ({formatIST(s.synced_at)})
                   </option>
                 ))}
               </select>
@@ -231,7 +232,7 @@ export default function Diff() {
               >
                 {snapshots.map((s) => (
                   <option key={s.id} value={s.id}>
-                    Snap {s.id} ({new Date(s.synced_at).toLocaleDateString()})
+                    Snap {s.id} ({formatIST(s.synced_at)})
                   </option>
                 ))}
               </select>
@@ -249,7 +250,7 @@ export default function Diff() {
             )}
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 shrink-0">
             {actSnapB && (
               <span className="text-xs text-ink-500 font-mono">
                 {new Date(actSnapB.synced_at).toLocaleString()}

@@ -7,12 +7,13 @@ import {
 import { api } from "../api";
 import type { DashboardStats, Snapshot, Sheet } from "../types";
 import { Users, Activity, Trophy, GraduationCap, ChevronRight, Clock, RefreshCw } from "lucide-react";
+import { formatIST, parseUTCDate } from "../utils";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<number | null>(null);
-  
+
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [selectedSnapshot, setSelectedSnapshot] = useState<number | null>(null);
   
@@ -145,11 +146,11 @@ export default function Dashboard() {
     <div className="flex h-full bg-ink-950 text-ink-50 font-sans overflow-hidden">
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-y-auto custom-scrollbar relative">
-        <header className="h-16 shrink-0 border-b border-ink-800/60 flex items-center justify-between px-8 bg-ink-950/80 backdrop-blur sticky top-0 z-10">
-          <h1 className="text-xl font-display font-bold tracking-tight text-ink-50">Dashboard</h1>
-          <div className="flex items-center gap-3">
+        <header className="h-16 shrink-0 border-b border-ink-800/60 items-center justify-between px-4 lg:px-8 bg-ink-950/80 backdrop-blur sticky top-0 z-10 flex overflow-x-auto no-scrollbar">
+          <h1 className="text-xl font-display font-bold tracking-tight text-ink-50 shrink-0 mr-4">Dashboard</h1>
+          <div className="flex items-center gap-2 lg:gap-3 shrink-0">
             <select
-              className="bg-ink-900 border border-ink-800 rounded-md text-sm py-1.5 px-3 outline-none focus:border-amber-500/50 text-ink-100 max-w-[200px] truncate"
+              className="bg-ink-900 border border-ink-800 rounded-md text-sm py-1.5 px-3 outline-none focus:border-amber-500/50 text-ink-100 max-w-[150px] sm:max-w-[200px] truncate shrink-0"
               value={selectedSheet ?? ""}
               onChange={(e) => setSelectedSheet(parseInt(e.target.value))}
               disabled={sheets.length === 0}
@@ -161,16 +162,16 @@ export default function Dashboard() {
             <button 
               onClick={handleSync}
               disabled={syncing || selectedSheet === null}
-              className="flex items-center justify-center py-1.5 px-3 rounded-md text-[10px] uppercase font-bold tracking-wide bg-ink-800 text-amber-500 hover:bg-ink-700 transition-colors disabled:opacity-50"
+              className="flex items-center justify-center py-1.5 px-3 rounded-md text-[10px] uppercase font-bold tracking-wide bg-ink-800 text-amber-500 hover:bg-ink-700 transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Re-Sync"}
             </button>
 
-            <span className="text-sm text-ink-400 opacity-50 ml-1">|</span>
+            <span className="text-sm text-ink-400 opacity-50 ml-1 shrink-0 hidden sm:inline">|</span>
 
-            <span className="text-sm text-ink-400 ml-1">Snapshot:</span>
+            <span className="text-sm text-ink-400 ml-1 whitespace-nowrap shrink-0 hidden sm:inline">Snapshot:</span>
             <select
-              className="bg-ink-900 border border-ink-800 rounded-md text-sm py-1.5 px-3 outline-none focus:border-amber-500/50 text-ink-100"
+              className="bg-ink-900 border border-ink-800 rounded-md text-sm py-1.5 px-3 outline-none focus:border-amber-500/50 text-ink-100 shrink-0 max-w-[140px] md:max-w-none truncate"
               value={selectedSnapshot ?? ""}
               onChange={(e) => setSelectedSnapshot(parseInt(e.target.value))}
               disabled={snapshots.length === 0}
@@ -178,7 +179,7 @@ export default function Dashboard() {
               {snapshots.length === 0 && <option value="">No snapshots</option>}
               {snapshots.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {new Date(s.synced_at).toLocaleDateString()} - {new Date(s.synced_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  {formatIST(s.synced_at, true)}
                 </option>
               ))}
             </select>
@@ -300,7 +301,7 @@ export default function Dashboard() {
             <div className="text-xs text-ink-500 text-center mt-10">No recent changes detected.</div>
           ) : (
             stats.recent_changes.map((change, i) => {
-              const diffTime = new Date().getTime() - new Date(change.synced_at).getTime();
+              const diffTime = new Date().getTime() - parseUTCDate(change.synced_at).getTime();
               const hoursAgo = Math.max(0, Math.floor(diffTime / (1000 * 60 * 60)));
               
               return (

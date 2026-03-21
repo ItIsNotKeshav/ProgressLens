@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "../api";
 import type { ReportConfig, Snapshot, StudentRow, Field, Sheet } from "../types";
-import { Printer, Copy, FileText, CheckSquare, Square } from "lucide-react";
+import { FileText, Printer, Copy, CheckSquare, Square } from "lucide-react";
+import { formatIST } from "../utils";
 
 export default function Report() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -189,7 +190,7 @@ export default function Report() {
             >
               {snapshots.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.source_label} ({new Date(s.synced_at).toLocaleDateString()})
+                  {s.source_label} ({formatIST(s.synced_at)})
                 </option>
               ))}
             </select>

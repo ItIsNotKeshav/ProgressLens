@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api";
-import { RefreshCw, Link as LinkIcon, Settings2, X } from "lucide-react";
+import { RefreshCw, Link as LinkIcon, Settings2, X, Sun, Moon } from "lucide-react";
 import type { FieldConfig } from "../types";
 
 const NAV_ITEMS = [
@@ -57,6 +57,21 @@ export default function Layout() {
   const [showInput, setShowInput] = useState(false);
   const [configs, setConfigs] = useState<FieldConfig[] | null>(null);
   const [sheetLabel, setSheetLabel] = useState("");
+  const [isLight, setIsLight] = useState(() => document.documentElement.classList.contains('light'));
+
+  useEffect(() => {
+    if (localStorage.getItem('theme') === 'light') {
+      document.documentElement.classList.add('light');
+      setIsLight(true);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !isLight;
+    document.documentElement.classList.toggle('light', next);
+    setIsLight(next);
+    localStorage.setItem('theme', next ? 'light' : 'dark');
+  };
 
   const handleSync = async () => {
     if (!sheetUrl) {
@@ -184,8 +199,15 @@ export default function Layout() {
             </button>
           )}
 
-          <div className="text-[10px] text-ink-600 font-mono text-center">
-            v0.1.0
+          <div className="flex items-center justify-between text-[10px] text-ink-600 font-mono">
+            <button 
+              onClick={toggleTheme} 
+              className="p-1.5 hover:text-ink-300 hover:bg-ink-800 rounded-md transition-colors"
+              title="Toggle theme"
+            >
+              {isLight ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+            </button>
+            <span>v0.1.0</span>
           </div>
         </div>
       </aside>

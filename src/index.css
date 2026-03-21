@@ -5,6 +5,58 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --ink-50:  245 243 240;
+    --ink-100: 232 228 222;
+    --ink-200: 208 200 190;
+    --ink-300: 181 169 154;
+    --ink-400: 154 139 121;
+    --ink-500: 125 110 94;
+    --ink-600: 99 87 74;
+    --ink-700: 74 65 58;
+    --ink-800: 48 43 38;
+    --ink-900: 26 23 19;
+    --ink-950: 13 12 10;
+
+    --amber-50:  255 251 235;
+    --amber-100: 254 243 199;
+    --amber-200: 253 230 138;
+    --amber-300: 252 211 77;
+    --amber-400: 251 191 36;
+    --amber-500: 245 158 11;
+    --amber-600: 217 119 6;
+    --amber-700: 180 83 9;
+    --amber-800: 146 64 14;
+    --amber-900: 120 53 15;
+    --amber-950: 69 26 3;
+
+    --sage-50:  241 245 242;
+    --sage-100: 220 232 223;
+    --sage-200: 185 209 191;
+    --sage-300: 143 179 154;
+    --sage-400: 103 146 120;
+    --sage-500: 74 117 93;
+    --sage-600: 58 93 74;
+    --sage-700: 45 71 57;
+    --sage-800: 31 47 40;
+    --sage-900: 19 28 24;
+    --sage-950: 9 14 12;
+  }
+
+  .light {
+    --ink-950: 255 255 255;
+    --ink-900: 245 243 240;
+    --ink-800: 232 228 222;
+    --ink-700: 208 200 190;
+    --ink-600: 181 169 154;
+    --ink-500: 154 139 121;
+    --ink-400: 125 110 94;
+    --ink-300: 99 87 74;
+    --ink-200: 74 65 58;
+    --ink-100: 48 43 38;
+    --ink-50:  26 23 19;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -39,11 +91,11 @@
 @layer components {
   .nav-link {
     @apply flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-ink-400
-           transition-all duration-200 hover:text-ink-100 hover:bg-ink-800/60;
+           transition-all duration-200 hover:text-ink-100 hover:bg-ink-800/60 border border-transparent;
   }
 
   .nav-link.active {
-    @apply bg-amber-500/10 text-amber-400 border border-amber-500/20;
+    @apply bg-amber-500/10 text-amber-400 border-amber-500/20;
   }
 
   .card {
