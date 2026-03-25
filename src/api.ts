@@ -12,6 +12,8 @@ import type {
   Field,
   Sheet,
   FieldConfig,
+  FieldSetup,
+  LevelStats,
 } from "./types";
 
 export const api = {
@@ -62,4 +64,33 @@ export const api = {
   /** Temporarily seed mock data directly into sqlite */
   seedMockData: (): Promise<SyncResult> => 
     invoke("seed_mock_data"),
+
+  getFieldSetup: (sheetId: number): Promise<FieldSetup[]> =>
+    invoke("get_field_setup", { sheetId }),
+
+  saveFieldSetup: (fields: FieldSetup[]): Promise<void> =>
+    invoke("save_field_setup", { fields }),
+
+  getLevelStats: (snapshotId: number): Promise<LevelStats> =>
+    invoke("get_level_stats", { snapshotId }),
+
+  /** Force sync all sheets, bypassing hash check */
+  forceSync: (): Promise<boolean> =>
+    invoke("force_sync"),
+
+  /** Get seconds since last auto-sync (null if never synced) */
+  getSyncStatus: (): Promise<number | null> =>
+    invoke("get_sync_status"),
+
+  /** Export report as Excel (.xlsx) — returns file path */
+  exportToExcel: (config: ReportConfig): Promise<string> =>
+    invoke("export_to_excel", { config }),
+
+  /** Export report to a new Google Sheet — returns sheet URL */
+  exportToGoogleSheet: (config: ReportConfig): Promise<string> =>
+    invoke("export_to_google_sheet", { config }),
+
+  /** Quick export: current view as Excel — returns file path */
+  exportCurrentView: (sheetId: number, studentIds: number[], fieldIds: number[]): Promise<string> =>
+    invoke("export_current_view", { sheetId, studentIds, fieldIds }),
 };

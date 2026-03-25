@@ -25,5 +25,11 @@ pub async fn init_db(db_path: PathBuf) -> Result<SqlitePool, sqlx::Error> {
     // Run embedded migrations from migrations/ directory
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    // Cleanup: remove rogue empty fields (from previous ranges=A:ZZ bug)
+    sqlx::query("DELETE FROM fields WHERE sheet_key = ''")
+        .execute(&pool)
+        .await
+        .ok(); // Ignore if it fails
+
     Ok(pool)
 }

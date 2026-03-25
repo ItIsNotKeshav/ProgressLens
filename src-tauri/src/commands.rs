@@ -9,11 +9,12 @@ use tauri::State;
 use crate::auth;
 use crate::diff;
 use crate::models::{
-    AvgScore, DashboardStats, DiffResult, Field, FieldConfig, LevelCount, RecentChange, ReportConfig, Snapshot,
-    StudentRow, SyncResult, TopPerformer,
+    AvgScore, DashboardStats, DiffResult, Field, FieldConfig, LevelCount, LevelStats, LevelTrackCount, RecentChange, ReportConfig, Snapshot,
+    StudentLevelRow, StudentRow, SyncResult, TopPerformer,
 };
 use crate::sheets;
 use crate::snapshot;
+use crate::sync_worker::SyncState;
 
 /// Wraps sqlx errors as strings for Tauri's serializable error path.
 fn db_err(e: sqlx::Error) -> String {
@@ -125,6 +126,9 @@ pub async fn sync_from_sheet(
     let snapshot_id =
         snapshot::save_snapshot(db_pool, sheet_id, &sheet_data, &roll_key, &name_key).await?;
 
+    // 7. Auto-classify fields
+    auto_classify_fields(db_pool, sheet_id).await?;
+
     Ok(SyncResult {
         sheet_id,
         snapshot_id,
@@ -172,6 +176,8 @@ pub async fn sync_sheet(
     let students_upserted = sheet_data.rows.len();
     let snapshot_id =
         snapshot::save_snapshot(db_pool, sheet_id,  &sheet_data, &roll_key, &name_key).await?;
+
+    auto_classify_fields(db_pool, sheet_id).await?;
 
     Ok(SyncResult {
         sheet_id,
@@ -291,16 +297,168 @@ pub async fn get_all_students(
 #[tauri::command]
 pub async fn get_fields(db: State<'_, SqlitePool>) -> Result<Vec<Field>, String> {
     log::info!("get_fields");
-    let rows: Vec<(i64, Option<i64>, String, String, String, bool)> = sqlx::query_as(
-        "SELECT id, sheet_id, label, sheet_key, data_type, is_visible FROM fields ORDER BY id"
+    let rows: Vec<(i64, Option<i64>, String, String, Option<String>, bool, Option<String>, Option<f64>, bool)> = sqlx::query_as(
+        "SELECT id, sheet_id, label, sheet_key, data_type, is_visible, display_name, max_value, include_in_dashboard FROM fields ORDER BY id"
     )
         .fetch_all(db.inner())
         .await
         .map_err(db_err)?;
     
-    Ok(rows.into_iter().map(|(id, sheet_id, label, sheet_key, data_type, is_visible)| Field {
-        id, sheet_id, label, sheet_key, data_type, is_visible
+    Ok(rows.into_iter().map(|(id, sheet_id, label, sheet_key, data_type, is_visible, display_name, max_value, include_in_dashboard)| Field {
+        id, sheet_id, label, sheet_key, data_type, is_visible, display_name, max_value, include_in_dashboard
     }).collect())
+}
+
+#[tauri::command]
+pub async fn get_field_setup(sheet_id: i64, db: State<'_, SqlitePool>) -> Result<Vec<crate::models::FieldSetup>, String> {
+    let rows: Vec<(i64, String, String, Option<String>, Option<String>, Option<f64>, bool, bool)> = sqlx::query_as(
+        "SELECT id, sheet_key, label, display_name, data_type, max_value, is_visible, include_in_dashboard FROM fields WHERE sheet_id = ? ORDER BY id"
+    ).bind(sheet_id).fetch_all(db.inner()).await.map_err(db_err)?;
+
+    let mut result = Vec::new();
+    for (id, sheet_key, label, display_name, data_type, max_value, is_visible, include_in_dashboard) in rows {
+        let display_name = display_name.unwrap_or(label.clone());
+        let sample_values: Vec<String> = sqlx::query_scalar("SELECT value FROM student_values WHERE field_id = ? AND value != '' LIMIT 3")
+            .bind(id)
+            .fetch_all(db.inner()).await.map_err(db_err)?;
+
+        result.push(crate::models::FieldSetup {
+            id, sheet_key, label, display_name, data_type, max_value, is_visible, include_in_dashboard, sample_values
+        });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn save_field_setup(fields: Vec<crate::models::FieldSetup>, db: State<'_, SqlitePool>) -> Result<(), String> {
+    let mut tx = db.inner().begin().await.map_err(db_err)?;
+    for field in fields {
+        sqlx::query("UPDATE fields SET data_type = ?, display_name = ?, max_value = ?, is_visible = ?, include_in_dashboard = ? WHERE id = ?")
+            .bind(&field.data_type)
+            .bind(&field.display_name)
+            .bind(field.max_value)
+            .bind(field.is_visible)
+            .bind(field.include_in_dashboard)
+            .bind(field.id)
+            .execute(&mut *tx).await.map_err(db_err)?;
+    }
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+
+async fn auto_classify_fields(db: &SqlitePool, sheet_id: i64) -> Result<(), String> {
+    let fields: Vec<(i64, String, String)> = sqlx::query_as("SELECT id, sheet_key, label FROM fields WHERE sheet_id = ? AND data_type IS NULL")
+        .bind(sheet_id)
+        .fetch_all(db).await.map_err(db_err)?;
+
+    for (field_id, sheet_key, label) in fields {
+        let samples: Vec<String> = sqlx::query_scalar("SELECT value FROM student_values WHERE field_id = ? AND value != '' LIMIT 20")
+            .bind(field_id)
+            .fetch_all(db).await.map_err(db_err)?;
+
+        let mut data_type = "text";
+        let mut max_value: Option<f64> = None;
+        let mut include_dashboard = false;
+
+        let key_lower = sheet_key.to_lowercase();
+        
+        let mut is_link = false;
+        let mut is_identifier = false;
+        let mut is_score = false;
+        let mut is_level = false;
+        let mut is_categorical = false;
+
+        if key_lower.contains("name") || key_lower.contains("usn") || key_lower.contains("roll") || key_lower.contains("email") || key_lower.contains("phone") || key_lower.contains("section") {
+            is_identifier = true;
+        } else {
+            let http_count = samples.iter().filter(|s| s.starts_with("http")).count();
+            if !samples.is_empty() && http_count * 2 > samples.len() {
+                is_link = true;
+            } else {
+                let level_keys = vec!["level", "ax", "sx", "cx", "px", "l4", "tyl"];
+                if level_keys.iter().any(|&k| key_lower.contains(k)) {
+                    let mut all_levels = true;
+                    for s in &samples {
+                        if let Ok(num) = s.parse::<i32>() {
+                            if num < 0 || num > 6 { all_levels = false; }
+                        } else {
+                            all_levels = false;
+                        }
+                    }
+                    if !samples.is_empty() && all_levels {
+                        is_level = true;
+                    }
+                }
+
+                if !is_level {
+                    let score_keys = vec!["score", "marks", "cgpa", "gpa"];
+                    let has_score_key = score_keys.iter().any(|&k| key_lower.contains(k))
+                        || key_lower.ends_with("_5") || key_lower.ends_with("_10") || key_lower.ends_with("_100");
+                    if has_score_key {
+                        let mut numeric_count = 0;
+                        for s in &samples {
+                            if s.parse::<f64>().is_ok() { numeric_count += 1; }
+                        }
+                        if !samples.is_empty() && numeric_count * 2 > samples.len() {
+                            is_score = true;
+                        }
+                    }
+                }
+
+                if !is_level && !is_score {
+                    use std::collections::HashSet;
+                    let unique: HashSet<&String> = samples.iter().collect();
+                    if !samples.is_empty() && unique.len() < 10 {
+                        let mut all_short = true;
+                        for s in &unique {
+                            if s.len() > 30 { all_short = false; }
+                        }
+                        if all_short {
+                            is_categorical = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_identifier {
+            data_type = "identifier";
+            include_dashboard = false;
+        } else if is_link {
+            data_type = "link";
+            include_dashboard = false;
+        } else if is_level {
+            data_type = "level";
+            max_value = Some(4.0);
+            include_dashboard = true;
+        } else if is_score {
+            data_type = "score";
+            include_dashboard = true;
+            if key_lower.ends_with("_5") || key_lower.contains("_5_") {
+                max_value = Some(5.0);
+            } else if key_lower.ends_with("_10") || key_lower.contains("_10_") {
+                max_value = Some(10.0);
+            } else if key_lower.ends_with("_100") || key_lower.contains("_100_") {
+                max_value = Some(100.0);
+            } else {
+                max_value = Some(100.0);
+            }
+        } else if is_categorical {
+            data_type = "categorical";
+            include_dashboard = false;
+        }
+
+        let display_name_str = label.clone();
+
+        sqlx::query("UPDATE fields SET data_type = ?, max_value = ?, include_in_dashboard = ?, display_name = ? WHERE id = ?")
+            .bind(data_type)
+            .bind(max_value)
+            .bind(include_dashboard)
+            .bind(&display_name_str)
+            .bind(field_id)
+            .execute(db).await.map_err(db_err)?;
+    }
+    Ok(())
 }
 
 // ─── get_snapshots ───────────────────────────────────────────────────────────
@@ -385,9 +543,9 @@ pub async fn get_dashboard_stats(
     .unwrap_or(0);
 
     let avg_rows: Vec<(String, f64)> = sqlx::query_as(
-        "SELECT f.label, COALESCE(AVG(CAST(sv.value AS REAL)), 0.0) \
+        "SELECT COALESCE(f.display_name, f.label), COALESCE(AVG(CAST(sv.value AS REAL)), 0.0) \
          FROM student_values sv JOIN fields f ON f.id = sv.field_id \
-         WHERE sv.snapshot_id = ? AND f.data_type = 'number' AND sv.value != '' \
+         WHERE sv.snapshot_id = ? AND f.data_type = 'score' AND f.include_in_dashboard = 1 AND sv.value != '' \
          GROUP BY f.id"
     )
     .bind(snap_id)
@@ -398,9 +556,9 @@ pub async fn get_dashboard_stats(
     let avg_score_per_field = avg_rows.into_iter().map(|(field_label, avg)| AvgScore { field_label, avg }).collect();
 
     let level_rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT f.label, sv.value, COUNT(sv.student_id) \
+        "SELECT COALESCE(f.display_name, f.label), sv.value, COUNT(sv.student_id) \
          FROM student_values sv JOIN fields f ON f.id = sv.field_id \
-         WHERE sv.snapshot_id = ? AND (LOWER(f.label) LIKE '%level%' OR LOWER(sv.value) LIKE '%level%') AND sv.value != '' \
+         WHERE sv.snapshot_id = ? AND f.data_type = 'level' AND sv.value != '' \
          GROUP BY f.id, sv.value"
     )
     .bind(snap_id)
@@ -411,11 +569,11 @@ pub async fn get_dashboard_stats(
     let level_distribution = level_rows.into_iter().map(|(field_label, level, count)| LevelCount { field_label, level, count }).collect();
 
     let top_rows: Vec<(String, f64, String)> = sqlx::query_as(
-        "SELECT s.name, CAST(sv.value AS REAL), f.label \
+        "SELECT s.name, CAST(sv.value AS REAL), COALESCE(f.display_name, f.label) \
          FROM student_values sv \
          JOIN students s ON s.id = sv.student_id \
          JOIN fields f ON f.id = sv.field_id \
-         WHERE sv.snapshot_id = ? AND f.data_type = 'number' AND sv.value != '' \
+         WHERE sv.snapshot_id = ? AND f.data_type = 'score' AND sv.value != '' \
          ORDER BY CAST(sv.value AS REAL) DESC LIMIT 5"
     )
     .bind(snap_id)
@@ -462,6 +620,136 @@ pub async fn get_dashboard_stats(
     })
 }
 
+// ─── get_level_stats ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_level_stats(
+    snapshot_id: i64,
+    db: State<'_, SqlitePool>,
+) -> Result<LevelStats, String> {
+    log::info!("get_level_stats: snapshot_id={}", snapshot_id);
+    let db_pool = db.inner();
+
+    // 1. Get all fields of type 'level' (and optionally include_in_dashboard = 1 if desired, but we'll get all levels)
+    // Actually per user, "for each 'level' typed field".
+    let level_fields: Vec<(i64, String, Option<f64>)> = sqlx::query_as(
+        "SELECT id, COALESCE(display_name, label), max_value FROM fields WHERE data_type = 'level' ORDER BY id"
+    )
+    .fetch_all(db_pool)
+    .await
+    .map_err(db_err)?;
+
+    let mut per_track: HashMap<i64, LevelTrackCount> = HashMap::new();
+    let mut field_max: HashMap<i64, i32> = HashMap::new();
+
+    for (f_id, d_name, max_val) in level_fields {
+        let max = max_val.unwrap_or(4.0) as i32;
+        field_max.insert(f_id, max);
+        let mut counts = HashMap::new();
+        // Initialize counts 1..max ?
+        for i in 1..=4 {
+            counts.insert(i, 0);
+        }
+        per_track.insert(f_id, LevelTrackCount {
+            field_id: f_id,
+            display_name: d_name,
+            counts,
+        });
+    }
+
+    // 2. Get students mapped to their levels
+    let rows: Vec<(i64, String, String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT s.id, s.name, s.roll_number, f.id, sv.value \
+         FROM students s \
+         CROSS JOIN fields f \
+         LEFT JOIN student_values sv ON sv.student_id = s.id AND sv.field_id = f.id AND sv.snapshot_id = ? \
+         WHERE f.data_type = 'level' \
+         ORDER BY s.id, f.id"
+    )
+    .bind(snapshot_id)
+    .fetch_all(db_pool)
+    .await
+    .map_err(db_err)?;
+
+
+
+    let mut student_map: HashMap<i64, StudentLevelRow> = HashMap::new();
+
+    for (s_id, s_name, s_usn, f_id, val_opt) in rows {
+        let entry = student_map.entry(s_id).or_insert_with(|| StudentLevelRow {
+            student_id: s_id,
+            name: s_name,
+            usn: s_usn,
+            levels: HashMap::new(),
+        });
+
+        let level_val = val_opt.and_then(|v| {
+            if v.is_empty() || v.to_lowercase() == "null" { None } else { v.parse::<i32>().ok() }
+        });
+
+        entry.levels.insert(f_id.to_string(), level_val);
+
+        if let Some(lvl) = level_val {
+            if let Some(track) = per_track.get_mut(&f_id) {
+                *track.counts.entry(lvl).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let student_level_rows: Vec<StudentLevelRow> = student_map.into_values().collect();
+
+    let mut complete_count = 0;
+    let mut gap_count = 0;
+    let mut not_started_count = 0;
+
+    for row in &student_level_rows {
+        let mut is_complete = true;
+        let mut has_gap = false;
+        let mut has_any_started = false;
+
+        for (f_id_str, level_val) in &row.levels {
+            let f_id = f_id_str.parse::<i64>().unwrap_or(0);
+            let target_max = field_max.get(&f_id).copied().unwrap_or(4);
+
+            match level_val {
+                Some(v) => {
+                    has_any_started = true;
+                    if *v < target_max {
+                        is_complete = false;
+                    }
+                    if *v == 0 {
+                        has_gap = true;
+                    }
+                }
+                None => {
+                    is_complete = false;
+                    has_gap = true; // empty means gap
+                }
+            }
+        }
+
+        if !has_any_started && !row.levels.is_empty() {
+            // Not started if all are None
+            not_started_count += 1;
+        } else if is_complete && !row.levels.is_empty() {
+            complete_count += 1;
+        } else if has_gap {
+            gap_count += 1;
+        }
+    }
+
+    let mut pt_vec: Vec<LevelTrackCount> = per_track.into_values().collect();
+    pt_vec.sort_by_key(|t| t.field_id);
+
+    Ok(LevelStats {
+        per_track: pt_vec,
+        student_level_rows,
+        complete_count,
+        gap_count,
+        not_started_count,
+    })
+}
+
 // ─── generate_report ───────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -487,8 +775,8 @@ pub async fn generate_report(
     let snap_label = snap.0;
     let snap_synced = snap.1;
 
-    let fields: Vec<(i64, String, String)> = sqlx::query_as(&format!(
-        "SELECT id, label, data_type FROM fields WHERE id IN ({}) ORDER BY id", field_id_list
+    let fields: Vec<(i64, String, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT id, COALESCE(display_name, label), data_type FROM fields WHERE id IN ({}) ORDER BY id", field_id_list
     )).fetch_all(db_pool).await.map_err(db_err)?;
 
     let students: Vec<(i64, String, String)> = sqlx::query_as(&format!(
@@ -528,7 +816,8 @@ pub async fn generate_report(
     let mut num_numeric = 0;
     
     for (fid, label, dtype) in &fields {
-        if dtype == "number" {
+        let dtype_str = dtype.as_deref().unwrap_or("text");
+        if dtype_str == "score" {
             num_numeric += 1;
             let mut sum: f64 = 0.0;
             let mut count = 0;
@@ -546,7 +835,7 @@ pub async fn generate_report(
                     label, sum / count as f64
                 ));
             }
-        } else if dtype == "text" && label.to_lowercase().contains("level") {
+        } else if dtype_str == "level" || dtype_str == "categorical" {
             let mut counts: HashMap<String, i64> = HashMap::new();
             for (sid, _, _) in &students {
                 if let Some(val) = cur_map.get(&(*sid, *fid)) {
@@ -586,11 +875,12 @@ pub async fn generate_report(
         let mut unchanged = 0;
 
         for (fid, _, dtype) in &fields {
+            let dtype_str = dtype.as_deref().unwrap_or("text");
             let cur = cur_map.get(&(*sid, *fid));
             let prev = prev_map.get(&(*sid, *fid));
             
             // For link-type fields, show "Submitted" / "Not submitted" instead of raw URL
-            let val_str = if dtype == "link" {
+            let val_str = if dtype_str == "link" {
                 match cur {
                     Some(v) if !v.is_empty() => "Submitted".to_string(),
                     _ => "Not submitted".to_string(),
@@ -601,7 +891,7 @@ pub async fn generate_report(
             let mut td_class = "";
 
             // For link fields, colour based on presence
-            if dtype == "link" {
+            if dtype_str == "link" {
                 td_class = match cur {
                     Some(v) if !v.is_empty() => "bg-up",
                     _ => "bg-down",
@@ -610,7 +900,7 @@ pub async fn generate_report(
                 if let (Some(c), Some(p)) = (cur, prev) {
                     if c == p {
                         unchanged += 1;
-                    } else if dtype == "number" {
+                    } else if dtype_str == "score" || dtype_str == "level" {
                         if let (Ok(num_c), Ok(num_p)) = (c.parse::<f64>(), p.parse::<f64>()) {
                             if num_c > num_p {
                                 improved += 1;
@@ -966,4 +1256,47 @@ pub async fn seed_mock_data(db: State<'_, SqlitePool>) -> Result<SyncResult, Str
         source_label: "Mock Exam 3".into(),
         synced_at: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+// ─── force_sync ────────────────────────────────────────────────────────────
+
+/// Force-sync all sheets, bypassing hash check.
+#[tauri::command]
+pub async fn force_sync(
+    data_dir: State<'_, PathBuf>,
+    db: State<'_, SqlitePool>,
+    sync_state: State<'_, std::sync::Arc<SyncState>>,
+    app_handle: tauri::AppHandle,
+) -> Result<bool, String> {
+    use tauri::Emitter;
+
+    log::info!("force_sync: running forced sync...");
+
+    let changed = crate::sync_worker::try_sync_if_changed(
+        db.inner(),
+        &data_dir,
+        &sync_state,
+        true, // force = true, bypass hash check
+    )
+    .await?;
+
+    // Always emit the event on force sync so UI refreshes
+    let _ = app_handle.emit("sync:updated", ());
+
+    Ok(changed)
+}
+
+// ─── get_sync_status ──────────────────────────────────────────────────────
+
+/// Returns the number of seconds since the last successful auto-sync.
+/// Returns None if no auto-sync has occurred yet.
+#[tauri::command]
+pub async fn get_sync_status(
+    sync_state: State<'_, std::sync::Arc<SyncState>>,
+) -> Result<Option<u64>, String> {
+    let last = sync_state.last_sync_at.lock().await;
+    match *last {
+        Some(instant) => Ok(Some(instant.elapsed().as_secs())),
+        None => Ok(None),
+    }
 }

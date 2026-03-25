@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "../api";
 import type { ReportConfig, Snapshot, StudentRow, Field, Sheet } from "../types";
-import { FileText, Printer, Copy, CheckSquare, Square } from "lucide-react";
+import { FileText, Printer, Copy, CheckSquare, Square, FileSpreadsheet, Check } from "lucide-react";
 import { formatIST } from "../utils";
 
 export default function Report() {
@@ -25,6 +25,10 @@ export default function Report() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Export state
+  const [exporting, setExporting] = useState<"excel" | "gsheet" | null>(null);
+  const [exportToast, setExportToast] = useState<string | null>(null);
 
   // Initialize data
   useEffect(() => {
@@ -85,19 +89,23 @@ export default function Report() {
     fetchStudents();
   }, [selectedSheet, snapshotId]);
 
-  async function handleGenerate() {
+  function buildConfig(): ReportConfig | null {
     if (snapshotId === null || selStudents.size === 0 || selFields.size === 0) {
-        setError("Please select at least one student and one field.");
-        return;
+      setError("Please select at least one student and one field.");
+      return null;
     }
-
-    const config: ReportConfig = {
+    return {
       snapshot_id: snapshotId,
       student_ids: Array.from(selStudents),
       field_ids: Array.from(selFields),
       include_progress_notes: includeNotes,
       include_summary: includeSummary,
     };
+  }
+
+  async function handleGenerate() {
+    const config = buildConfig();
+    if (!config) return;
 
     try {
       setGenerating(true);
@@ -110,6 +118,28 @@ export default function Report() {
     } finally {
       setGenerating(false);
     }
+  }
+
+  async function handleExportExcel() {
+    const config = buildConfig();
+    if (!config) return;
+
+    try {
+      setExporting("excel");
+      setError(null);
+      const filepath = await api.exportToExcel(config);
+      const filename = filepath.split(/[/\\]/).pop() || "file";
+      showToast(`Saved to Downloads/${filename}`);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  function showToast(msg: string) {
+    setExportToast(msg);
+    setTimeout(() => setExportToast(null), 4000);
   }
 
   function toggleStudent(id: number) {
@@ -144,9 +174,23 @@ export default function Report() {
     }
   }
 
+  const canExport = snapshotId !== null && selStudents.size > 0 && selFields.size > 0;
+
   return (
     <div className="flex h-full bg-ink-950 text-ink-50 overflow-hidden font-sans">
       
+      {/* Export Toast */}
+      <div
+        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 px-5 py-3 rounded-xl bg-ink-900 border border-ink-700 text-ink-100 text-sm font-medium shadow-2xl transition-all duration-300 ${
+          exportToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+      >
+        <span className="w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center">
+          <Check className="w-3 h-3 text-emerald-400" />
+        </span>
+        {exportToast}
+      </div>
+
       {/* Left Config Panel */}
       <aside className="w-[360px] shrink-0 flex flex-col border-r border-ink-800/60 bg-ink-900/30 overflow-y-auto custom-scrollbar relative z-10">
         <header className="px-6 py-6 border-b border-ink-800/60 bg-ink-950/80 sticky top-0 backdrop-blur">
@@ -291,16 +335,30 @@ export default function Report() {
 
         </div>
         
-        <div className="p-6 border-t border-ink-800/60 bg-ink-950/80 sticky bottom-0 backdrop-blur mt-auto">
-            {error && <div className="text-xs text-red-400 mb-3 bg-red-400/10 p-2 rounded">{error}</div>}
+        <div className="p-6 border-t border-ink-800/60 bg-ink-950/80 sticky bottom-0 backdrop-blur mt-auto space-y-3">
+            {error && <div className="text-xs text-red-400 mb-1 bg-red-400/10 p-2 rounded">{error}</div>}
             
             <button
               onClick={handleGenerate}
-              disabled={generating || snapshotId === null || selStudents.size === 0 || selFields.size === 0}
+              disabled={generating || !canExport}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-lg font-semibold text-sm transition-all shadow-[0_0_15px_rgba(245,158,11,0.15)] disabled:opacity-50 disabled:shadow-none"
             >
               <FileText className="w-4 h-4" />
               {generating ? "Generating..." : "Generate Report"}
+            </button>
+
+            {/* Export button */}
+            <button
+              onClick={handleExportExcel}
+              disabled={!canExport || exporting !== null}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-ink-900 border border-ink-800 text-ink-300 hover:text-emerald-400 hover:border-emerald-500/30 rounded-lg text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {exporting === "excel" ? (
+                <Spinner />
+              ) : (
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+              )}
+              Export as Excel
             </button>
         </div>
       </aside>
@@ -366,7 +424,7 @@ export default function Report() {
 
 function Spinner() {
   return (
-    <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
       <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.372 0 0 5.372 0 12h4Z" />
     </svg>

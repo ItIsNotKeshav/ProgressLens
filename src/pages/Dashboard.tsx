@@ -1,12 +1,12 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Cell
 } from "recharts";
 import { api } from "../api";
-import type { DashboardStats, Snapshot, Sheet } from "../types";
-import { Users, Activity, Trophy, GraduationCap, ChevronRight, Clock, RefreshCw } from "lucide-react";
+import type { DashboardStats, Snapshot, Sheet, LevelStats } from "../types";
+import { Users, Activity, CheckCircle2, AlertCircle, ChevronRight, Clock, RefreshCw } from "lucide-react";
 import { formatIST, parseUTCDate } from "../utils";
 
 export default function Dashboard() {
@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [selectedSnapshot, setSelectedSnapshot] = useState<number | null>(null);
   
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [levelStats, setLevelStats] = useState<LevelStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +62,10 @@ export default function Dashboard() {
       }
     }
     loadSnaps();
+
+    const handleRefresh = () => loadSnaps();
+    window.addEventListener("progresslens:refresh", handleRefresh);
+    return () => window.removeEventListener("progresslens:refresh", handleRefresh);
   }, [selectedSheet]);
 
   // When snapshot changes, load stats
@@ -72,8 +77,14 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
       try {
-        const data = await api.getDashboardStats(selectedSheet!, selectedSnapshot!);
-        if (!cancelled) setStats(data);
+        const [dashData, lvlData] = await Promise.all([
+          api.getDashboardStats(selectedSheet!, selectedSnapshot!),
+          api.getLevelStats(selectedSnapshot!)
+        ]);
+        if (!cancelled) {
+          setStats(dashData);
+          setLevelStats(lvlData);
+        }
       } catch (err) {
         if (!cancelled) setError(String(err));
       } finally {
@@ -101,38 +112,13 @@ export default function Dashboard() {
     }
   };
 
-  // Derived calculations
-  const highestAvg = useMemo(() => {
-    if (!stats || stats.avg_score_per_field.length === 0) return null;
-    return [...stats.avg_score_per_field].sort((a, b) => b.avg - a.avg)[0];
-  }, [stats]);
-
-  const levelChartData = useMemo(() => {
-    if (!stats) return { data: [], levels: [] as string[] };
-    
-    // Group level_distribution by field_label
-    const fieldsMap = new Map<string, Record<string, number>>();
-    const levelsSet = new Set<string>();
-
-    for (const l of stats.level_distribution) {
-      if (!fieldsMap.has(l.field_label)) {
-        fieldsMap.set(l.field_label, {});
-      }
-      fieldsMap.get(l.field_label)![l.level] = l.count;
-      levelsSet.add(l.level);
-    }
-
-    const data = [];
-    for (const [field_label, counts] of fieldsMap.entries()) {
-      data.push({ name: field_label, ...counts });
-    }
-    
-    const levels = Array.from(levelsSet).sort(); // simple string sort -> Level 1, Level 2...
-    return { data, levels };
-  }, [stats]);
-
-  // Color palette for levels
-  const levelColors = ["#fcd34d", "#f59e0b", "#d97706", "#b45309", "#78350f"];
+  // Color palette for levels (1-4)
+  const pipColors: Record<number, string> = {
+    1: "bg-amber-600",
+    2: "bg-amber-500",
+    3: "bg-lime-500",
+    4: "bg-emerald-500",
+  };
 
   if (error) {
     return (
@@ -165,6 +151,14 @@ export default function Dashboard() {
               className="flex items-center justify-center py-1.5 px-3 rounded-md text-[10px] uppercase font-bold tracking-wide bg-ink-800 text-amber-500 hover:bg-ink-700 transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
             >
               {syncing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Re-Sync"}
+            </button>
+
+            <button 
+              onClick={() => selectedSheet && navigate(`/field-setup?sheet_id=${selectedSheet}`)}
+              disabled={selectedSheet === null || syncing}
+              className="flex items-center justify-center py-1.5 px-3 rounded-md text-[10px] uppercase font-bold tracking-wide bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-amber-500 transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+            >
+              Field Settings
             </button>
 
             <span className="text-sm text-ink-400 opacity-50 ml-1 shrink-0 hidden sm:inline">|</span>
@@ -209,32 +203,85 @@ export default function Dashboard() {
                   title="Active / Updated (7d)" 
                   value={stats.active_this_week} 
                   icon={<Activity className="w-5 h-5 text-amber-500" />} 
-                  subtitle="Students with changes"
                 />
                 <MetricCard 
-                  title="Highest Average" 
-                  value={highestAvg ? highestAvg.avg.toFixed(1) : "—"} 
-                  icon={<Trophy className="w-5 h-5 text-sage-400" />} 
-                  subtitle={highestAvg?.field_label}
+                  title="Complete" 
+                  value={levelStats?.complete_count ?? 0} 
+                  icon={<CheckCircle2 className="w-5 h-5 text-emerald-500" />} 
+                  subtitle="All tracks at max level"
+                  onClick={() => navigate(`/students?sheet=${selectedSheet}&status=complete`)}
+                  clickable={true}
                 />
                 <MetricCard 
-                  title="Top Performers" 
-                  value={stats.top_performers.length} 
-                  icon={<GraduationCap className="w-5 h-5 text-purple-400" />} 
-                  subtitle="Students excelling"
+                  title="Have Gaps" 
+                  value={levelStats?.gap_count ?? 0} 
+                  icon={<AlertCircle className="w-5 h-5 text-red-500" />} 
+                  subtitle="Missing or level 0 tracks"
+                  onClick={() => navigate(`/students?sheet=${selectedSheet}&status=gap`)}
+                  clickable={true}
                 />
               </div>
 
+              {/* Track Cards Row */}
+              {levelStats && levelStats.per_track.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold tracking-wide text-ink-300 uppercase mb-4">Level Tracks</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {levelStats.per_track.map(track => {
+                      const total = Object.values(track.counts).reduce((a, b) => a + b, 0) || 1;
+                      return (
+                        <div
+                          key={track.field_id}
+                          role="button"
+                          onClick={() => navigate(`/students?sheet=${selectedSheet}&track=${track.field_id}`)}
+                          className="w-full block bg-ink-900/40 border border-ink-800/60 rounded-xl p-4 sm:p-5 hover:bg-ink-800/50 hover:border-amber-500/30 transition-all text-left group overflow-hidden"
+                        >
+                          <h4 className="font-medium text-ink-100 mb-6 group-hover:text-amber-400 transition-colors w-full truncate block" title={track.display_name}>
+                            {track.display_name}
+                          </h4>
+                          <div className="flex items-end justify-between gap-1 sm:gap-2 h-24">
+                            {[1, 2, 3, 4].map(level => {
+                              const count = track.counts[level] || 0;
+                              const hPct = Math.max(8, (count / total) * 100);
+                              return (
+                                <div 
+                                  key={level} 
+                                  className="flex flex-col items-center gap-1.5 sm:gap-2 flex-1 group/bar cursor-pointer min-w-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/students?sheet=${selectedSheet}&track=${track.field_id}&level=${level}`);
+                                  }}
+                                >
+                                  <div className="w-full max-w-[40px] bg-ink-950 rounded-t-sm flex items-end overflow-hidden justify-center relative h-12">
+                                    <div 
+                                      className={`w-full ${pipColors[level]} rounded-t-sm opacity-80 group-hover/bar:opacity-100 transition-all`} 
+                                      style={{ height: `${hPct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[9px] sm:text-[10px] font-mono text-ink-500 group-hover/bar:text-ink-300 transition-colors w-full text-center truncate">
+                                    Level-{level} <span className="text-ink-600 block text-center truncate">{count}</span>
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Charts Row */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
                 
                 {/* Score Averages Chart */}
-                <div className="bg-ink-900/30 border border-ink-800/60 rounded-xl p-6">
-                  <h3 className="text-sm font-semibold tracking-wide text-ink-300 uppercase mb-6">Score Averages</h3>
-                  {stats.avg_score_per_field.length > 0 ? (
+                {stats.avg_score_per_field.length > 0 && (
+                  <div className="bg-ink-900/30 border border-ink-800/60 rounded-xl p-6">
+                    <h3 className="text-sm font-semibold tracking-wide text-ink-300 uppercase mb-6">Score Averages</h3>
                     <div className="h-72">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={stats.avg_score_per_field} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <BarChart data={stats.avg_score_per_field.map(d => ({ ...d, avg: parseFloat(d.avg.toFixed(2)) }))} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" />
                           <XAxis dataKey="field_label" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
                           <YAxis stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
@@ -251,36 +298,8 @@ export default function Dashboard() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                  ) : (
-                    <div className="text-sm text-ink-500 h-72 flex items-center justify-center">No numeric fields to average.</div>
-                  )}
-                </div>
-
-                {/* Level Distribution Chart */}
-                <div className="bg-ink-900/30 border border-ink-800/60 rounded-xl p-6">
-                  <h3 className="text-sm font-semibold tracking-wide text-ink-300 uppercase mb-6">Level Distribution</h3>
-                  {levelChartData.data.length > 0 ? (
-                    <div className="h-72">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={levelChartData.data} layout="vertical" margin={{ top: 0, right: 10, left: 10, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#27272a" />
-                          <XAxis type="number" stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                          <YAxis dataKey="name" type="category" width={100} stroke="#71717a" fontSize={12} tickLine={false} axisLine={false} />
-                          <Tooltip 
-                            cursor={{ fill: '#27272a', opacity: 0.4 }}
-                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#3f3f46', borderRadius: '8px' }}
-                          />
-                          <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                          {levelChartData.levels.map((lvl, i) => (
-                            <Bar key={lvl} dataKey={lvl} stackId="a" fill={levelColors[i % levelColors.length]} />
-                          ))}
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-ink-500 h-72 flex items-center justify-center">No level-based fields detected.</div>
-                  )}
-                </div>
+                  </div>
+                )}
 
               </div>
 
@@ -339,9 +358,9 @@ export default function Dashboard() {
   );
 }
 
-function MetricCard({ title, value, icon, subtitle }: { title: string; value: string | number; icon: React.ReactNode; subtitle?: string }) {
-  return (
-    <div className="bg-ink-900/30 border border-ink-800/60 rounded-xl p-5 flex flex-col relative overflow-hidden group hover:bg-ink-800/20 transition-colors">
+function MetricCard({ title, value, icon, subtitle, onClick, clickable }: { title: string; value: string | number; icon: React.ReactNode; subtitle?: string, onClick?: () => void, clickable?: boolean }) {
+  const inner = (
+    <>
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium tracking-wider text-ink-400 uppercase">{title}</h3>
         {icon}
@@ -354,6 +373,16 @@ function MetricCard({ title, value, icon, subtitle }: { title: string; value: st
           {subtitle}
         </div>
       )}
+    </>
+  );
+
+  return clickable ? (
+    <button onClick={onClick} className="text-left bg-ink-900/30 border border-ink-800/60 rounded-xl p-5 flex flex-col relative overflow-hidden group hover:bg-ink-800/50 hover:border-amber-500/30 transition-all cursor-pointer">
+      {inner}
+    </button>
+  ) : (
+    <div className="bg-ink-900/30 border border-ink-800/60 rounded-xl p-5 flex flex-col relative overflow-hidden group">
+      {inner}
     </div>
   );
 }

@@ -18,24 +18,32 @@ export interface Sheet {
 
 export interface Field {
   id: number;
-  sheet_id: number;
+  sheet_id: number | null;
   label: string;
   sheet_key: string;
-  data_type: string;
+  data_type: string | null;
   is_visible: boolean;
+  display_name: string | null;
+  max_value: number | null;
+  include_in_dashboard: boolean;
+}
+
+export interface FieldSetup {
+  id: number;
+  sheet_key: string;
+  label: string;
+  display_name: string;
+  data_type: string | null;
+  max_value: number | null;
+  is_visible: boolean;
+  include_in_dashboard: boolean;
+  sample_values: string[];
 }
 
 export interface FieldConfig {
   sheet_key: string;
   label: string;
-  data_type: string;
-  is_visible: boolean;
-}
-
-export interface FieldConfig {
-  sheet_key: string;
-  label: string;
-  data_type: string;
+  data_type: string | null;
   is_visible: boolean;
 }
 
@@ -136,4 +144,25 @@ export interface ReportConfig {
   field_ids: number[];
   include_progress_notes: boolean;
   include_summary?: boolean;
+}
+
+export interface LevelTrackCount {
+  field_id: number;
+  display_name: string;
+  counts: Record<string, number>;
+}
+
+export interface StudentLevelRow {
+  student_id: number;
+  name: string;
+  usn: string;
+  levels: Record<string, number | null>;
+}
+
+export interface LevelStats {
+  per_track: LevelTrackCount[];
+  student_level_rows: StudentLevelRow[];
+  complete_count: number;
+  gap_count: number;
+  not_started_count: number;
 }

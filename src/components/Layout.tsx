@@ -1,8 +1,9 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../api";
 import { RefreshCw, Link as LinkIcon, Settings2, X, Sun, Moon } from "lucide-react";
 import type { FieldConfig } from "../types";
+import { listen } from "@tauri-apps/api/event";
 
 const NAV_ITEMS = [
   {
@@ -51,13 +52,70 @@ const NAV_ITEMS = [
   },
 ];
 
+function SyncStatusDot({ secsSinceSync }: { secsSinceSync: number | null }) {
+  if (secsSinceSync === null) {
+    return (
+      <span className="relative flex h-2.5 w-2.5" title="Not synced yet">
+        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-ink-600" />
+      </span>
+    );
+  }
+
+  let color: string;
+  let label: string;
+  let pulseColor: string;
+
+  if (secsSinceSync <= 120) {
+    color = "bg-emerald-500";
+    pulseColor = "bg-emerald-400";
+    label = "Synced just now";
+  } else if (secsSinceSync <= 600) {
+    color = "bg-amber-500";
+    pulseColor = "bg-amber-400";
+    const mins = Math.floor(secsSinceSync / 60);
+    label = `Synced ${mins}m ago`;
+  } else {
+    color = "bg-red-500";
+    pulseColor = "bg-red-400";
+    const mins = Math.floor(secsSinceSync / 60);
+    label = `Last sync ${mins}m ago`;
+  }
+
+  return (
+    <span className="relative flex h-2.5 w-2.5" title={label}>
+      {secsSinceSync <= 120 && (
+        <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pulseColor} opacity-75`} />
+      )}
+      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${color}`} />
+    </span>
+  );
+}
+
+function formatSyncLabel(secs: number | null): string {
+  if (secs === null) return "Not synced";
+  if (secs <= 120) return "Synced";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ago`;
+}
+
 export default function Layout() {
+  const navigate = useNavigate();
   const [sheetUrl, setSheetUrl] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [showInput, setShowInput] = useState(false);
   const [configs, setConfigs] = useState<FieldConfig[] | null>(null);
   const [sheetLabel, setSheetLabel] = useState("");
   const [isLight, setIsLight] = useState(() => document.documentElement.classList.contains('light'));
+
+  // ─── Sync status state ─────────────────────────────────────────────────
+  const [syncSecs, setSyncSecs] = useState<number | null>(null);
+  const [autoSyncToast, setAutoSyncToast] = useState(false);
+  const [forceSyncing, setForceSyncing] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+
 
   useEffect(() => {
     if (localStorage.getItem('theme') === 'light') {
@@ -66,12 +124,61 @@ export default function Layout() {
     }
   }, []);
 
+  // Poll sync status every 10 seconds
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const secs = await api.getSyncStatus();
+        setSyncSecs(secs);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen for sync:updated events from backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    listen("sync:updated", () => {
+      // Refresh sync status immediately
+      api.getSyncStatus().then(setSyncSecs).catch(() => {});
+      setSyncSecs(0); // optimistic: set to 0
+
+      // Show auto-sync toast
+      setAutoSyncToast(true);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setAutoSyncToast(false), 3000);
+
+      // Trigger a page-level refresh by dispatching a custom event
+      window.dispatchEvent(new CustomEvent("progresslens:refresh"));
+    }).then(fn => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
+  }, []);
+
   const toggleTheme = () => {
     const next = !isLight;
     document.documentElement.classList.toggle('light', next);
     setIsLight(next);
     localStorage.setItem('theme', next ? 'light' : 'dark');
   };
+
+  const handleForceSync = useCallback(async () => {
+    if (forceSyncing) return;
+    try {
+      setForceSyncing(true);
+      await api.forceSync();
+      setSyncSecs(0);
+    } catch (e) {
+      console.error("Force sync failed:", e);
+    } finally {
+      setForceSyncing(false);
+    }
+  }, [forceSyncing]);
+
+
 
   const handleSync = async () => {
     if (!sheetUrl) {
@@ -91,7 +198,7 @@ export default function Layout() {
         setShowInput(false);
         setSheetUrl("");
         setSheetLabel("");
-        window.location.reload(); 
+        navigate(`/field-setup?sheet_id=${res.sheet_id}`);
       }
     } catch (e) {
       alert(`Operation failed: ${e}`);
@@ -151,10 +258,31 @@ export default function Layout() {
               {item.label}
             </NavLink>
           ))}
+
         </nav>
 
         {/* Footer Sync Action */}
         <div className="p-4 border-t border-ink-800/60 flex flex-col gap-3">
+          {/* ── Sync Status Bar ─────────────────────────────────────── */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <SyncStatusDot secsSinceSync={syncSecs} />
+              <span className="text-[10px] text-ink-500 font-mono truncate">
+                {formatSyncLabel(syncSecs)}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleForceSync}
+                disabled={forceSyncing}
+                title="Force sync now"
+                className="p-1.5 hover:text-amber-400 hover:bg-ink-800 rounded-md transition-colors text-ink-500 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${forceSyncing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
           {showInput ? (
             <div className="flex flex-col gap-2">
               <input 
@@ -214,6 +342,21 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto relative bg-ink-950">
+        {/* Auto-sync toast */}
+        <div
+          className={`fixed top-4 right-4 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-medium backdrop-blur-sm shadow-lg transition-all duration-300 ${
+            autoSyncToast ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'
+          }`}
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          Auto-synced just now
+        </div>
+
+
+
         {configs ? (
           <div className="absolute inset-0 z-50 bg-ink-950/95 backdrop-blur overflow-y-auto p-8 flex flex-col items-center">
             <div className="max-w-4xl w-full">
@@ -268,7 +411,7 @@ export default function Layout() {
                         </td>
                         <td className="px-6 py-4">
                           <select
-                            value={cfg.data_type}
+                            value={cfg.data_type || ""}
                             onChange={(e) => updateConfig(idx, { data_type: e.target.value })}
                             className="w-full bg-ink-950 border border-ink-800 rounded px-3 py-1.5 text-sm text-ink-100 outline-none focus:border-amber-500/50"
                           >
@@ -317,4 +460,3 @@ export default function Layout() {
     </div>
   );
 }
-

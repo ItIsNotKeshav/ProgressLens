@@ -4,6 +4,7 @@ import Dashboard from "./pages/Dashboard";
 import Students from "./pages/Students";
 import Diff from "./pages/Diff";
 import Report from "./pages/Report";
+import FieldSetup from "./pages/FieldSetup";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/students" element={<Students />} />
         <Route path="/diff" element={<Diff />} />
         <Route path="/report" element={<Report />} />
+        <Route path="/field-setup" element={<FieldSetup />} />
       </Route>
     </Routes>
   );

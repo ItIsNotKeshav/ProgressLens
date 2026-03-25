@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────────────────────
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashMap;
 
 // ─── Public types ──────────────────────────────────────────────────────────
@@ -14,8 +15,8 @@ pub struct FieldMeta {
     pub label: String,
     /// Normalised key, e.g. "marks_obtained"
     pub field_key: String,
-    /// Detected type: "number", "text", or "level"
-    pub data_type: String,
+    /// Detected type, will be populated on first sync classification
+    pub data_type: Option<String>,
 }
 
 /// Everything we get from a sheet: column definitions + all data rows.
@@ -80,14 +81,14 @@ pub fn extract_spreadsheet_id(url: &str) -> Result<String, String> {
 
 /// Fetches the first sheet of the spreadsheet, treating row 1 as headers
 /// and rows 2+ as data.
-pub async fn fetch_sheet(
+/// Fetch the raw JSON response from the Sheets API (used for hash-based change detection).
+pub async fn fetch_sheet_raw(
     sheet_url: &str,
     access_token: &str,
-) -> Result<SheetData, String> {
+) -> Result<String, String> {
     let spreadsheet_id = extract_spreadsheet_id(sheet_url)?;
-
     let api_url = format!(
-        "https://sheets.googleapis.com/v4/spreadsheets/{}?includeGridData=true&ranges=A:ZZ",
+        "https://sheets.googleapis.com/v4/spreadsheets/{}?includeGridData=true&ranges=A:ZZ&alt=json&prettyPrint=false",
         spreadsheet_id
     );
 
@@ -96,6 +97,8 @@ pub async fn fetch_sheet(
     let resp = client
         .get(&api_url)
         .bearer_auth(access_token)
+        .header("Cache-Control", "no-cache")
+        .header("Pragma", "no-cache")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
@@ -106,9 +109,15 @@ pub async fn fetch_sheet(
         return Err(format!("Sheets API returned {}: {}", status, body));
     }
 
-    let spreadsheet: SpreadsheetResponse = resp
-        .json()
+    resp.text()
         .await
+        .map_err(|e| format!("Failed to read response body: {}", e))
+}
+
+/// Parse a raw Sheets API JSON response into SheetData.
+/// This is the shared parsing pipeline used by both fetch_sheet and the sync worker.
+pub fn parse_sheet_response(raw_body: &str) -> Result<SheetData, String> {
+    let spreadsheet: SpreadsheetResponse = serde_json::from_str(raw_body)
         .map_err(|e| format!("Failed to parse Sheets API response: {}", e))?;
 
     let source_label = spreadsheet
@@ -143,19 +152,23 @@ pub async fn fetch_sheet(
         .filter(|r| !r.iter().all(|c| c.is_empty())) // skip fully blank rows
         .collect();
 
-    // Auto-detect column types by sampling data
-    let headers: Vec<FieldMeta> = raw_headers
-        .iter()
-        .enumerate()
-        .map(|(i, label)| {
-            let data_type = detect_column_type(&data_rows, i);
-            FieldMeta {
-                label: label.clone(),
-                field_key: normalise_key(label),
-                data_type,
-            }
-        })
-        .collect();
+    // Auto-detect column types by sampling data and skip empty headers
+    let mut headers: Vec<FieldMeta> = Vec::new();
+    let mut header_indices: Vec<usize> = Vec::new(); // keep track of original column indices
+
+    for (i, label) in raw_headers.iter().enumerate() {
+        let field_key = normalise_key(label);
+        if field_key.is_empty() {
+            continue; // Ignore blank columns
+        }
+        let data_type = detect_column_type(&data_rows, i);
+        headers.push(FieldMeta {
+            label: label.clone(),
+            field_key,
+            data_type,
+        });
+        header_indices.push(i);
+    }
 
     // Build row maps keyed by field_key
     let rows: Vec<HashMap<String, String>> = data_rows
@@ -163,9 +176,9 @@ pub async fn fetch_sheet(
         .map(|row| {
             headers
                 .iter()
-                .enumerate()
-                .map(|(i, field)| {
-                    let value = row.get(i).cloned().unwrap_or_default();
+                .zip(&header_indices)
+                .map(|(field, &col_idx)| {
+                    let value = row.get(col_idx).cloned().unwrap_or_default();
                     (field.field_key.clone(), value)
                 })
                 .collect()
@@ -177,6 +190,14 @@ pub async fn fetch_sheet(
         rows,
         source_label: format!("Sheet: {}", source_label),
     })
+}
+
+pub async fn fetch_sheet(
+    sheet_url: &str,
+    access_token: &str,
+) -> Result<SheetData, String> {
+    let raw_body = fetch_sheet_raw(sheet_url, access_token).await?;
+    parse_sheet_response(&raw_body)
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -206,34 +227,9 @@ fn normalise_key(label: &str) -> String {
         .join("_")
 }
 
-/// Detect column type by sampling the first 20 non-empty data values.
-fn detect_column_type(data_rows: &[Vec<String>], col_idx: usize) -> String {
-    let samples: Vec<&str> = data_rows
-        .iter()
-        .filter_map(|row| row.get(col_idx).map(|s| s.as_str()))
-        .filter(|s| !s.is_empty())
-        .take(20)
-        .collect();
-
-    if samples.is_empty() {
-        return "text".to_string();
-    }
-
-    // Check for "Level N" pattern
-    let level_re = Regex::new(r"(?i)^level\s*\d+$").unwrap();
-    let level_count = samples.iter().filter(|s| level_re.is_match(s)).count();
-    if level_count * 2 >= samples.len() {
-        return "level".to_string();
-    }
-
-    // Check if values are numeric (int or float, allowing %)
-    let numeric_re = Regex::new(r"^-?\d+(\.\d+)?%?$").unwrap();
-    let numeric_count = samples.iter().filter(|s| numeric_re.is_match(s)).count();
-    if numeric_count * 2 >= samples.len() {
-        return "number".to_string();
-    }
-
-    "text".to_string()
+/// old detection logic disabled, now returning None
+fn detect_column_type(_data_rows: &[Vec<String>], _col_idx: usize) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -256,33 +252,4 @@ mod tests {
         assert_eq!(normalise_key("  spaces  "), "spaces");
     }
 
-    #[test]
-    fn test_detect_column_type_numeric() {
-        let rows = vec![
-            vec!["85".into()],
-            vec!["92.5".into()],
-            vec!["76".into()],
-        ];
-        assert_eq!(detect_column_type(&rows, 0), "number");
-    }
-
-    #[test]
-    fn test_detect_column_type_level() {
-        let rows = vec![
-            vec!["Level 3".into()],
-            vec!["Level 2".into()],
-            vec!["level 1".into()],
-        ];
-        assert_eq!(detect_column_type(&rows, 0), "level");
-    }
-
-    #[test]
-    fn test_detect_column_type_text() {
-        let rows = vec![
-            vec!["Alice".into()],
-            vec!["Bob".into()],
-            vec!["Charlie".into()],
-        ];
-        assert_eq!(detect_column_type(&rows, 0), "text");
-    }
 }

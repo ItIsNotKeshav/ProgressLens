@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { DiffResult, StudentDiff, Snapshot, Sheet, Field } from "../types";
 import { ExternalLink } from "lucide-react";
 import { formatIST } from "../utils";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export default function Diff() {
   const [searchParams] = useSearchParams();
@@ -50,6 +51,12 @@ export default function Diff() {
     if (selectedSheet !== null) {
       loadSnapshots(selectedSheet);
       api.getFields().then(setFields).catch(() => {});
+
+      const handleRefresh = () => {
+        loadSnapshots(selectedSheet, true); // forceLatest since syncing creates new snapshot
+      };
+      window.addEventListener("progresslens:refresh", handleRefresh);
+      return () => window.removeEventListener("progresslens:refresh", handleRefresh);
     }
   }, [selectedSheet]);
 
@@ -123,11 +130,24 @@ export default function Diff() {
     if (!val) return <span className="text-ink-600">—</span>;
     if (isLinkField(fieldKey)) {
       return (
-        <a href={val} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors"
+        <button
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+              let tgt = val;
+              if (!tgt.startsWith('http://') && !tgt.startsWith('https://')) {
+                tgt = 'https://' + tgt;
+              }
+              await openUrl(tgt);
+            } catch (err) {
+              console.error("Failed to open URL:", err);
+            }
+          }}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors cursor-pointer"
         >
           View <ExternalLink className="w-3 h-3" />
-        </a>
+        </button>
       );
     }
     return <span className={`px-2 py-0.5 rounded font-mono text-xs ${style}`}>{val}</span>;

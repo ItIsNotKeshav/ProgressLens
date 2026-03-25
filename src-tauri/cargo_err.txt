@@ -1,0 +1,207 @@
+    Checking progress-lens v0.1.0 (D:\VSCode\ProgressLens\src-tauri)
+error[E0412]: cannot find type `LevelStats` in this scope
+   --> src\commands.rs:628:13
+    |
+628 | ) -> Result<LevelStats, String> {
+    |             ^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::LevelStats;
+    |
+
+error[E0412]: cannot find type `LevelTrackCount` in this scope
+   --> src\commands.rs:641:37
+    |
+641 |     let mut per_track: HashMap<i64, LevelTrackCount> = HashMap::new();
+    |                                     ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:80:1
+    |
+ 80 | pub struct LevelCount {
+    | --------------------- similarly named struct `LevelCount` defined here
+    |
+help: a struct with a similar name exists
+    |
+641 -     let mut per_track: HashMap<i64, LevelTrackCount> = HashMap::new();
+641 +     let mut per_track: HashMap<i64, LevelCount> = HashMap::new();
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::LevelTrackCount;
+    |
+
+error[E0422]: cannot find struct, variant or union type `LevelTrackCount` in this scope
+   --> src\commands.rs:652:32
+    |
+652 |         per_track.insert(f_id, LevelTrackCount {
+    |                                ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:80:1
+    |
+ 80 | pub struct LevelCount {
+    | --------------------- similarly named struct `LevelCount` defined here
+    |
+help: a struct with a similar name exists
+    |
+652 -         per_track.insert(f_id, LevelTrackCount {
+652 +         per_track.insert(f_id, LevelCount {
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::LevelTrackCount;
+    |
+
+error[E0412]: cannot find type `StudentLevelRow` in this scope
+   --> src\commands.rs:675:39
+    |
+675 |     let mut student_map: HashMap<i64, StudentLevelRow> = HashMap::new();
+    |                                       ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:66:1
+    |
+ 66 | pub struct StudentRow {
+    | --------------------- similarly named struct `StudentRow` defined here
+    |
+help: a struct with a similar name exists
+    |
+675 -     let mut student_map: HashMap<i64, StudentLevelRow> = HashMap::new();
+675 +     let mut student_map: HashMap<i64, StudentRow> = HashMap::new();
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::StudentLevelRow;
+    |
+
+error[E0422]: cannot find struct, variant or union type `StudentLevelRow` in this scope
+   --> src\commands.rs:678:63
+    |
+678 |         let entry = student_map.entry(s_id).or_insert_with(|| StudentLevelRow {
+    |                                                               ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:66:1
+    |
+ 66 | pub struct StudentRow {
+    | --------------------- similarly named struct `StudentRow` defined here
+    |
+help: a struct with a similar name exists
+    |
+678 -         let entry = student_map.entry(s_id).or_insert_with(|| StudentLevelRow {
+678 +         let entry = student_map.entry(s_id).or_insert_with(|| StudentRow {
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::StudentLevelRow;
+    |
+
+error[E0412]: cannot find type `StudentLevelRow` in this scope
+   --> src\commands.rs:698:33
+    |
+698 |     let student_level_rows: Vec<StudentLevelRow> = student_map.into_values().collect();
+    |                                 ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:66:1
+    |
+ 66 | pub struct StudentRow {
+    | --------------------- similarly named struct `StudentRow` defined here
+    |
+help: a struct with a similar name exists
+    |
+698 -     let student_level_rows: Vec<StudentLevelRow> = student_map.into_values().collect();
+698 +     let student_level_rows: Vec<StudentRow> = student_map.into_values().collect();
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::StudentLevelRow;
+    |
+
+error[E0412]: cannot find type `LevelTrackCount` in this scope
+   --> src\commands.rs:740:25
+    |
+740 |     let mut pt_vec: Vec<LevelTrackCount> = per_track.into_values().collect();
+    |                         ^^^^^^^^^^^^^^^
+    |
+   ::: src\models.rs:80:1
+    |
+ 80 | pub struct LevelCount {
+    | --------------------- similarly named struct `LevelCount` defined here
+    |
+help: a struct with a similar name exists
+    |
+740 -     let mut pt_vec: Vec<LevelTrackCount> = per_track.into_values().collect();
+740 +     let mut pt_vec: Vec<LevelCount> = per_track.into_values().collect();
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::LevelTrackCount;
+    |
+
+error[E0422]: cannot find struct, variant or union type `LevelStats` in this scope
+   --> src\commands.rs:743:8
+    |
+743 |     Ok(LevelStats {
+    |        ^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct
+    |
+  4 + use crate::models::LevelStats;
+    |
+
+error[E0425]: cannot find function `get_level_stats` in this scope
+  --> src\lib.rs:51:13
+   |
+51 |             get_level_stats,
+   |             ^^^^^^^^^^^^^^^ not found in this scope
+   |
+help: consider importing this function
+   |
+12 + use crate::commands::get_level_stats;
+   |
+
+warning: unused import: `std::collections::hash_map::Entry`
+   --> src\commands.rs:673:9
+    |
+673 |     use std::collections::hash_map::Entry;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0282]: type annotations needed
+   --> src\commands.rs:710:24
+    |
+710 |             let f_id = f_id_str.parse::<i64>().unwrap_or(0);
+    |                        ^^^^^^^^ cannot infer type
+
+error: this function depends on never type fallback being `()`
+   --> src\lib.rs:19:1
+    |
+ 19 | pub fn run() {
+    | ^^^^^^^^^^^^
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/never-type-fallback.html>
+    = help: specify the types explicitly
+note: in edition 2024, the requirement `!: Deserialize<'_>` will fail
+   --> src\commands.rs:624:1
+    |
+624 |   #[tauri::command]
+    |   ^^^^^^^^^^^^^^^^^
+    |
+   ::: src\lib.rs:44:25
+    |
+ 44 |           .invoke_handler(tauri::generate_handler![
+    |  _________________________-
+ 45 | |             authenticate_google,
+ 46 | |             sync_from_sheet,
+ 47 | |             sync_sheet,
+...   |
+ 59 | |             preview_sheet,
+ 60 | |         ])
+    | |_________- in this macro invocation
+    = note: `#[deny(dependency_on_unit_never_type_fallback)]` (part of `#[deny(rust_2024_compatibility)]`) on by default
+    = note: this error originates in the macro `__cmd__get_level_stats` which comes from the expansion of the macro `tauri::generate_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0282, E0412, E0422, E0425.
+For more information about an error, try `rustc --explain E0282`.
+warning: `progress-lens` (lib) generated 1 warning
+error: could not compile `progress-lens` (lib) due to 12 previous errors; 1 warning emitted

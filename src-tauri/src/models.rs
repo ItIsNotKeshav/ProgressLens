@@ -26,15 +26,31 @@ pub struct Field {
     pub sheet_id: Option<i64>,
     pub label: String,
     pub sheet_key: String,
-    pub data_type: String,
+    pub data_type: Option<String>,
     pub is_visible: bool,
+    pub display_name: Option<String>,
+    pub max_value: Option<f64>,
+    pub include_in_dashboard: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FieldSetup {
+    pub id: i64,
+    pub sheet_key: String,
+    pub label: String,
+    pub display_name: String,
+    pub data_type: Option<String>,
+    pub max_value: Option<f64>,
+    pub is_visible: bool,
+    pub include_in_dashboard: bool,
+    pub sample_values: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FieldConfig {
     pub sheet_key: String,
     pub label: String,
-    pub data_type: String,
+    pub data_type: Option<String>,
     pub is_visible: bool,
 }
 
@@ -148,4 +164,28 @@ pub struct ReportConfig {
     pub include_progress_notes: bool,
     #[serde(default)]
     pub include_summary: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LevelTrackCount {
+    pub field_id: i64,
+    pub display_name: String,
+    pub counts: HashMap<i32, i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StudentLevelRow {
+    pub student_id: i64,
+    pub name: String,
+    pub usn: String,
+    pub levels: HashMap<String, Option<i32>>, // mapping from field_id text to level, JSON keys should be strings
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LevelStats {
+    pub per_track: Vec<LevelTrackCount>,
+    pub student_level_rows: Vec<StudentLevelRow>,
+    pub complete_count: i64,
+    pub gap_count: i64,
+    pub not_started_count: i64,
 }
