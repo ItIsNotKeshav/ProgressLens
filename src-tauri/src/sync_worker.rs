@@ -92,12 +92,12 @@ pub async fn try_sync_if_changed(
         let sheet_data = sheets::parse_sheet_response(&raw_body)?;
 
         let (roll_key, name_key) = snapshot::detect_identity_columns(&sheet_data);
-        let _snapshot_id =
+        let snapshot_result =
             snapshot::save_snapshot(db, *sheet_id, &sheet_data, &roll_key, &name_key).await?;
 
         // Update hash
         *sync_state.last_hash.lock().await = new_hash;
-        any_changed = true;
+        any_changed |= snapshot_result.created;
     }
 
     if any_changed {

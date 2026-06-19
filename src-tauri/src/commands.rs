@@ -123,8 +123,9 @@ pub async fn sync_from_sheet(
 
     // 6. Persist everything as a new snapshot
     let students_upserted = sheet_data.rows.len();
-    let snapshot_id =
+    let snapshot_result =
         snapshot::save_snapshot(db_pool, sheet_id, &sheet_data, &roll_key, &name_key).await?;
+    let snapshot_id = snapshot_result.snapshot_id;
 
     // 7. Auto-classify fields
     auto_classify_fields(db_pool, sheet_id).await?;
@@ -174,8 +175,9 @@ pub async fn sync_sheet(
 
     let (roll_key, name_key) = snapshot::detect_identity_columns(&sheet_data);
     let students_upserted = sheet_data.rows.len();
-    let snapshot_id =
+    let snapshot_result =
         snapshot::save_snapshot(db_pool, sheet_id,  &sheet_data, &roll_key, &name_key).await?;
+    let snapshot_id = snapshot_result.snapshot_id;
 
     auto_classify_fields(db_pool, sheet_id).await?;
 
@@ -1299,4 +1301,232 @@ pub async fn get_sync_status(
         Some(instant) => Ok(Some(instant.elapsed().as_secs())),
         None => Ok(None),
     }
+}
+
+// ─── AI Approval Workflow ──────────────────────────────────────────────────
+//
+// All queries use sqlx::query() (runtime, non-macro). The macro form
+// sqlx::query! requires DATABASE_URL at compile time; this project doesn't
+// set it, which causes E0282 type-inference errors.
+
+use crate::operations::PendingOperation;
+
+
+/// Returns all non-expired pending operations for the given sheet, newest first.
+#[tauri::command]
+pub async fn get_pending_operations(
+    sheet_id: i64,
+    db: State<'_, SqlitePool>,
+) -> Result<Vec<PendingOperation>, String> {
+    let ops = sqlx::query_as::<_, PendingOperation>(
+        "SELECT id, kind, status, payload_json, preview_json, created_at, expires_at
+         FROM agent_operations
+         WHERE sheet_id = ? AND status = 'pending' AND datetime('now') < expires_at
+         ORDER BY created_at DESC",
+    )
+    .bind(sheet_id)
+    .fetch_all(db.inner())
+    .await
+    .map_err(db_err)?;
+
+    Ok(ops)
+}
+
+/// Approve a pending operation.
+///
+/// Safety:
+/// - Status guard prevents duplicate approvals.
+/// - Rust-side expiration check is a second layer beyond the SQL WHERE.
+/// - For student_update: integer IDs come from the DB; proposed_value is
+///   a sqlx bind parameter — never string-interpolated into SQL.
+/// - Everything runs in one SQLite transaction; failures roll back fully.
+#[tauri::command]
+pub async fn approve_operation(
+    operation_id: String,
+    db: State<'_, SqlitePool>,
+) -> Result<(), String> {
+    let mut tx = db.begin().await.map_err(db_err)?;
+
+    // 1. Fetch the operation row
+    let maybe_row = sqlx::query(
+        "SELECT sheet_id, expected_snapshot_id, kind, status, payload_json, expires_at
+         FROM agent_operations WHERE id = ?",
+    )
+    .bind(&operation_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    let row = maybe_row
+        .ok_or_else(|| format!("Operation '{}' not found", operation_id))?;
+
+    let status: String = row.get("status");
+    if status != "pending" {
+        return Err(format!(
+            "Cannot approve: status is '{status}' (must be 'pending')"
+        ));
+    }
+
+    // 2. Rust-side expiration guard
+    let expires_at_str: String = row.get("expires_at");
+    let expires_at =
+        chrono::NaiveDateTime::parse_from_str(&expires_at_str, "%Y-%m-%d %H:%M:%S")
+            .map_err(|e| format!("Invalid expiration timestamp: {e}"))?;
+    if chrono::Utc::now().naive_utc() >= expires_at {
+        sqlx::query("UPDATE agent_operations SET status = 'expired' WHERE id = ?")
+            .bind(&operation_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        return Err("Operation has expired and cannot be approved".to_string());
+    }
+
+    // 3. Execute the mutation (student_update only)
+    let kind: String = row.get("kind");
+    if kind == "student_update" {
+        let payload_json: String = row.get("payload_json");
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload_json).map_err(|e| e.to_string())?;
+
+        let student_id = payload
+            .get("student_id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| {
+                "Cannot execute: this operation is missing a student_id. \
+                The AI must use search_students first to resolve the exact student, \
+                then create a new pending operation with the correct student_id."
+                    .to_string()
+            })?;
+        let field_id = payload
+            .get("field_id")
+            .and_then(|v| v.as_i64())
+            .ok_or("Cannot execute: payload is missing field_id")?;
+        let proposed_value = payload
+            .get("proposed_value")
+            .and_then(|v| v.as_str())
+            .ok_or("Cannot execute: payload is missing proposed_value")?
+            .to_string();
+        let snapshot_id: Option<i64> = row.get("expected_snapshot_id");
+        let snapshot_id =
+            snapshot_id.ok_or("Cannot execute: expected_snapshot_id is NULL — the target snapshot was likely deleted")?;
+
+        // Pre-flight: verify all three FK targets exist before the INSERT
+        // This surfaces a clear error instead of the opaque SQLite code 787.
+        let student_exists: Option<i64> = sqlx::query_scalar("SELECT id FROM students WHERE id = ?")
+            .bind(student_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if student_exists.is_none() {
+            return Err(format!("Cannot execute: student with id={student_id} no longer exists in the database"));
+        }
+
+        let field_exists: Option<i64> = sqlx::query_scalar("SELECT id FROM fields WHERE id = ?")
+            .bind(field_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if field_exists.is_none() {
+            return Err(format!("Cannot execute: field with id={field_id} no longer exists — field configuration may have changed"));
+        }
+
+        let snapshot_exists: Option<i64> = sqlx::query_scalar("SELECT id FROM snapshots WHERE id = ?")
+            .bind(snapshot_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        if snapshot_exists.is_none() {
+            return Err(format!("Cannot execute: snapshot {snapshot_id} no longer exists — it may have been pruned. Ask the AI to re-create the operation against the current snapshot."));
+        }
+
+        sqlx::query(
+            "INSERT INTO student_values (snapshot_id, student_id, field_id, value)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(snapshot_id, student_id, field_id) DO UPDATE SET value = excluded.value",
+        )
+        .bind(snapshot_id)
+        .bind(student_id)
+        .bind(field_id)
+        .bind(&proposed_value)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+    }
+    // For mentor_note / intervention / other: no DB mutation needed,
+    // just mark executed + audit below.
+
+    // 4. Mark the operation executed
+    sqlx::query(
+        "UPDATE agent_operations SET status = 'executed', executed_at = datetime('now') WHERE id = ?",
+    )
+    .bind(&operation_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    // 5. Audit event
+    sqlx::query(
+        "INSERT INTO audit_events(operation_id, event_type, actor, details_json)
+         VALUES(?, 'operation_approved', 'user', '{}')",
+    )
+    .bind(&operation_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
+}
+
+/// Reject a pending operation.
+///
+/// Maps to DB status 'cancelled' (existing enum value for REJECTED).
+/// Records the rejection reason in audit_events.
+#[tauri::command]
+pub async fn reject_operation(
+    operation_id: String,
+    reason: Option<String>,
+    db: State<'_, SqlitePool>,
+) -> Result<(), String> {
+    let mut tx = db.begin().await.map_err(db_err)?;
+
+    let maybe_row = sqlx::query("SELECT status FROM agent_operations WHERE id = ?")
+        .bind(&operation_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+
+    let row = maybe_row
+        .ok_or_else(|| format!("Operation '{}' not found", operation_id))?;
+
+    let status: String = row.get("status");
+    if status != "pending" {
+        return Err(format!(
+            "Cannot reject: status is '{status}' (must be 'pending')"
+        ));
+    }
+
+    sqlx::query("UPDATE agent_operations SET status = 'cancelled' WHERE id = ?")
+        .bind(&operation_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_err)?;
+
+    let rejection_reason =
+        reason.unwrap_or_else(|| "User rejected without reason".to_string());
+    let details = serde_json::json!({ "reason": rejection_reason }).to_string();
+
+    sqlx::query(
+        "INSERT INTO audit_events(operation_id, event_type, actor, details_json)
+         VALUES(?, 'operation_rejected', 'user', ?)",
+    )
+    .bind(&operation_id)
+    .bind(&details)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    tx.commit().await.map_err(db_err)?;
+    Ok(())
 }

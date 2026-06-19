@@ -91,10 +91,11 @@ pub fn spawn_webhook_listener(
                 )
                 .await
                 {
-                    Ok(_) => {
+                    Ok(true) => {
                         log::info!("Webhook: sync complete, emitting sync:updated");
                         let _ = app_handle_clone.emit("sync:updated", ());
                     }
+                    Ok(false) => log::info!("Webhook: no data changes; no snapshot created"),
                     Err(e) => {
                         log::warn!("Webhook: sync error: {}", e);
                     }

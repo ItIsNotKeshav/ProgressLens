@@ -2,11 +2,15 @@
 // lib.rs — Tauri application entry point
 // ──────────────────────────────────────────────────────────────
 mod auth;
+mod agent;
+mod agent_tools;
 mod commands;
 mod db;
 mod diff;
 mod export;
 mod models;
+mod operations;
+mod ollama;
 mod sheets;
 mod snapshot;
 mod sync_worker;
@@ -16,8 +20,10 @@ use commands::{
     authenticate_google, generate_report, get_all_students, get_dashboard_stats, get_level_stats, get_diff,
     get_fields, get_field_setup, get_sheets, get_snapshots, save_field_setup, seed_mock_data, sync_from_sheet, sync_sheet, preview_sheet,
     force_sync, get_sync_status,
+    get_pending_operations, approve_operation, reject_operation,
 };
 use export::{export_to_excel, export_to_google_sheet, export_current_view};
+use agent::{agent_ask, agent_check_ollama, agent_get_messages, agent_get_settings, agent_save_settings};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -88,6 +94,14 @@ pub fn run() {
             export_to_excel,
             export_to_google_sheet,
             export_current_view,
+            agent_ask,
+            agent_get_messages,
+            agent_get_settings,
+            agent_save_settings,
+            agent_check_ollama,
+            get_pending_operations,
+            approve_operation,
+            reject_operation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ProgressLens");
