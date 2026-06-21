@@ -4,6 +4,7 @@ import { api } from "../api";
 import { RefreshCw, Link as LinkIcon, Settings2, X, Sun, Moon } from "lucide-react";
 import type { FieldConfig } from "../types";
 import { listen } from "@tauri-apps/api/event";
+import AssistantPanel from "./AssistantPanel";
 
 const NAV_ITEMS = [
   {
@@ -193,7 +194,10 @@ export default function Layout() {
         setConfigs(preview);
       } else {
         const res = await api.syncFromSheet(sheetUrl, configs, sheetLabel || undefined);
-        alert(`Success! Imported ${res.students_upserted} students from "${res.source_label}"`);
+        alert(res.snapshot_created
+          ? `Success! Imported ${res.students_upserted} students and saved a new snapshot from "${res.source_label}".`
+          : "Sync complete. No student data changed, so no new snapshot was created."
+        );
         setConfigs(null);
         setShowInput(false);
         setSheetUrl("");
@@ -457,6 +461,7 @@ export default function Layout() {
           <Outlet />
         )}
       </main>
+      <AssistantPanel />
     </div>
   );
 }

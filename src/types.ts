@@ -107,6 +107,7 @@ export interface DashboardStats {
 export interface SyncResult {
   sheet_id: number;
   snapshot_id: number;
+  snapshot_created: boolean;
   students_upserted: number;
   fields_detected: number;
   source_label: string;
@@ -165,4 +166,65 @@ export interface LevelStats {
   complete_count: number;
   gap_count: number;
   not_started_count: number;
+}
+
+export interface AgentResultRow {
+  student_id: number;
+  name: string;
+  roll_number: string;
+  detail: string;
+  value: number | null;
+}
+
+export interface AgentAskResponse {
+  conversation_id: string;
+  answer: string;
+  rows: AgentResultRow[];
+  read_only: boolean;
+  warnings: string[];
+  tools_used: string[];
+  model: string;
+}
+
+export interface AgentMessage {
+  id: number;
+  role: "user" | "assistant" | "tool";
+  content: string;
+  created_at: string;
+}
+
+export interface AgentSettings {
+  enabled: boolean;
+  ollama_endpoint: string;
+  model_name: string;
+  timeout_seconds: number;
+  max_tool_iterations: number;
+}
+
+export interface AgentHealth {
+  available: boolean;
+  message: string;
+  model: string;
+}
+
+/** Mirrors the Rust PendingOperation struct from operations.rs */
+export interface PendingOperation {
+  id: string;
+  kind: string;
+  status: string;
+  payload_json: string;
+  preview_json: string;
+  created_at: string;
+  expires_at: string;
+}
+
+/** Parsed preview data embedded inside a PendingOperation */
+export interface OperationPreview {
+  summary: string;
+  reason?: string;
+  student_name?: string;
+  field_name?: string;
+  current_value?: string;
+  proposed_value?: string;
+  notice?: string;
 }

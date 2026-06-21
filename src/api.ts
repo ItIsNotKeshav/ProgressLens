@@ -14,6 +14,11 @@ import type {
   FieldConfig,
   FieldSetup,
   LevelStats,
+  AgentAskResponse,
+  AgentMessage,
+  AgentSettings,
+  AgentHealth,
+  PendingOperation,
 } from "./types";
 
 export const api = {
@@ -93,4 +98,36 @@ export const api = {
   /** Quick export: current view as Excel — returns file path */
   exportCurrentView: (sheetId: number, studentIds: number[], fieldIds: number[]): Promise<string> =>
     invoke("export_current_view", { sheetId, studentIds, fieldIds }),
+
+  /** Ask the read-only academic data agent a question scoped to one sheet. */
+  agentAsk: (request: {
+    conversation_id: string | null;
+    sheet_id: number;
+    snapshot_id: number | null;
+    message: string;
+  }): Promise<AgentAskResponse> => invoke("agent_ask", { request }),
+
+  agentGetMessages: (conversationId: string): Promise<AgentMessage[]> =>
+    invoke("agent_get_messages", { conversationId }),
+
+  agentGetSettings: (): Promise<AgentSettings> =>
+    invoke("agent_get_settings"),
+
+  agentSaveSettings: (settings: AgentSettings): Promise<AgentSettings> =>
+    invoke("agent_save_settings", { settings }),
+
+  agentCheckOllama: (): Promise<AgentHealth> =>
+    invoke("agent_check_ollama"),
+
+  /** Get all pending (non-expired) AI-proposed operations for a sheet */
+  getPendingOperations: (sheetId: number): Promise<PendingOperation[]> =>
+    invoke("get_pending_operations", { sheetId }),
+
+  /** Approve a pending operation — executes the mutation */
+  approveOperation: (operationId: string): Promise<void> =>
+    invoke("approve_operation", { operationId }),
+
+  /** Reject a pending operation — marks it cancelled */
+  rejectOperation: (operationId: string, reason?: string): Promise<void> =>
+    invoke("reject_operation", { operationId, reason: reason ?? null }),
 };
