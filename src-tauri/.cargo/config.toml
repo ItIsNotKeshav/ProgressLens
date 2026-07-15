@@ -1,2 +1,15 @@
+# .cargo/config.toml
+#
+# Build-time environment variables for ProgressLens.
+# This file is gitignored — credentials stay on your machine only.
+#
+# Fill in your Google Cloud OAuth credentials below before building.
+# See docs/security.md for the full Google OAuth setup walkthrough.
+# Obtain credentials from: Google Cloud Console → APIs & Services → Credentials
+#   - Create an "OAuth 2.0 Client ID" of type "Desktop app"
+#   - Add http://localhost:8080 as an Authorized Redirect URI
+
 [env]
-SQLX_OFFLINE = "true"
+SQLX_OFFLINE     = "true"
+GOOGLE_CLIENT_ID     = "YOUR_GOOGLE_CLIENT_ID_HERE"
+GOOGLE_CLIENT_SECRET = "YOUR_GOOGLE_CLIENT_SECRET_HERE"

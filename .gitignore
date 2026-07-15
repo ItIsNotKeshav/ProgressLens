@@ -1,4 +1,4 @@
-# Logs
+# ─── Node / Frontend ─────────────────────────────────────────────────────────
 logs
 *.log
 npm-debug.log*
@@ -11,9 +11,29 @@ node_modules
 dist
 dist-ssr
 *.local
-.env
 
-# Editor directories and files
+# ─── Environment & Secrets ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Rust / Tauri Build Output ───────────────────────────────────────────────
+src-tauri/target/
+src-tauri/gen/
+
+# ─── Debug & Temporary Artifacts ─────────────────────────────────────────────
+# One-off scripts and build/error logs — never needed in version control
+check_db.js
+test_fetch.js
+tsc_out.txt
+src-tauri/*.txt
+src-tauri/*.log
+src-tauri/err*.json
+
+# ─── Local credential config (each developer fills in their own values) ───────
+src-tauri/.cargo/config.toml
+
+# ─── Editor Directories ───────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -23,3 +43,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db

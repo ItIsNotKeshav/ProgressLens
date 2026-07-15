@@ -63,13 +63,24 @@ pub fn save_stored_auth(data_dir: &std::path::Path, auth: &StoredAuth) -> Result
 }
 
 // ─── OAuth client builder ──────────────────────────────────────────────────
-
-/// NOTE: For production, store these in env vars or a config file.
-/// These are placeholder values — replace with your GCP credentials.
-const GOOGLE_CLIENT_ID: &str = "486140904182-847nauv7ulua9e2ag0p90b9a9uqmj4fu.apps.googleusercontent.com";
-const GOOGLE_CLIENT_SECRET: &str = "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";
-const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+//
+// Credentials are injected at compile time from environment variables.
+// Set them in your shell, in `.cargo/config.toml` under [env], or via your
+// CI/CD secrets manager before running `cargo build` or `npm run tauri dev`.
+//
+// Required environment variables:
+//   GOOGLE_CLIENT_ID      — from Google Cloud Console → APIs & Services → Credentials
+//   GOOGLE_CLIENT_SECRET  — from the same OAuth 2.0 Client ID entry
+//
+// See docs/security.md for the full setup guide.
+const GOOGLE_CLIENT_ID: &str = env!("GOOGLE_CLIENT_ID",
+    "Set the GOOGLE_CLIENT_ID environment variable before building. \
+     See docs/security.md for Google OAuth setup instructions.");
+const GOOGLE_CLIENT_SECRET: &str = env!("GOOGLE_CLIENT_SECRET",
+    "Set the GOOGLE_CLIENT_SECRET environment variable before building. \
+     See docs/security.md for Google OAuth setup instructions.");
+const AUTH_URL: &str     = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_URL: &str    = "https://oauth2.googleapis.com/token";
 const REDIRECT_URI: &str = "http://localhost:8080";
 
 fn build_oauth_client() -> Result<ConfiguredClient, String> {

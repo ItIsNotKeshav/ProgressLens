@@ -1,272 +1,417 @@
+﻿<div align="center">
+
 # ProgressLens
 
-ProgressLens is a modern desktop academic intelligence platform for tracking student progress from Google Sheets, analyzing performance over time, comparing historical snapshots, and generating clean progress reports.
+### AI-powered student progress analytics — fully local, privacy-first, desktop-native.
 
-Built with Tauri, React, TypeScript, TailwindCSS, SQLite, Recharts, React Router, and Lucide icons.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%202-24C8D8?logo=tauri)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Backend-Rust-orange?logo=rust)](https://www.rust-lang.org)
+[![React](https://img.shields.io/badge/Frontend-React%2019-61DAFB?logo=react)](https://react.dev)
+[![SQLite](https://img.shields.io/badge/Database-SQLite-003B57?logo=sqlite)](https://sqlite.org)
+[![Ollama](https://img.shields.io/badge/AI-Ollama%20%28local%29-black)](https://ollama.com)
 
-> Screenshots coming soon. Add dashboard, students, compare, reports, and field setup images here when ready.
+</div>
+
+---
 
 ## Overview
 
-ProgressLens turns spreadsheet-based academic tracking into a focused desktop analytics workspace. It syncs student data from Google Sheets, stores each sync as a local snapshot, and helps users understand progress, gaps, improvements, regressions, and report-ready outcomes.
+Academic coordinators, faculty, and mentors spend hours comparing spreadsheet versions to track whether students are improving, stagnating, or falling behind. ProgressLens eliminates that manual work.
 
-The app is designed for academic coordinators, mentors, faculty, and program teams who need a fast way to monitor student performance without manually comparing spreadsheet versions.
+**ProgressLens syncs your Google Sheet, stores every sync as a local snapshot, and lets you — or a local AI assistant — query, compare, and act on student progress data without touching a cloud AI service.**
 
-## Key Features
+Every student record, every score, every analysis, and every AI conversation stays on your machine. No data is sent to OpenAI, Anthropic, or any remote server.
 
-- **Google Sheets sync**: connect a Google Sheet, authenticate with Google, preview columns, and import student data.
-- **Snapshot-based tracking**: every sync creates a historical snapshot for point-in-time comparisons.
-- **Academic analytics dashboard**: view student health, completion, gap counts, score averages, level-track distributions, section analytics, recent activity, and sync status.
-- **Student explorer**: search and filter students by status, level progress, section, score ranges, categorical fields, and visible columns.
-- **Progress comparison**: compare two snapshots and inspect field-level changes for each student.
-- **Diff visualization**: see added, removed, changed, and unchanged values with old/new comparisons.
-- **Field configuration**: classify imported columns as score, level, categorical, text, link, or identifier fields.
-- **Report generation**: build print-ready progress reports from selected students, fields, and snapshots.
-- **Excel export**: export reports or the current filtered view as `.xlsx` files.
-- **Google Sheet export backend**: backend support exists for exporting generated reports to a new Google Sheet.
-- **Auto-sync**: background polling checks linked sheets and refreshes the UI when changes are detected.
-- **Webhook trigger**: local sync trigger endpoint for external automation, such as Google Apps Script.
-- **Dark-first desktop UI**: optimized for widescreen academic analytics workflows.
+### Why local-first AI?
 
-## App Screens
+- **Privacy** — Student performance data is sensitive. It should not traverse cloud APIs.
+- **Compliance** — Many institutions have data-residency requirements that cloud AI cannot satisfy.
+- **Cost** — Zero per-query cost. Run thousands of analyses without an API bill.
+- **Speed** — No network round-trip to a remote model. Responses come from your local GPU.
+- **Ownership** — You control the model, the data, and the infrastructure.
 
-### Dashboard
+---
 
-Academic command center with health metrics, analytics cards, snapshot activity, risk indicators, charts, and recent changes.
+## Features
 
-```md
-![Dashboard](./docs/images/dashboard.png)
+### 🖥️ Desktop Experience
+
+- Native desktop app built with Tauri 2 — no Electron, minimal memory footprint
+- Dark-first widescreen UI optimized for analytics workflows
+- Works offline after initial Google Sheets sync
+
+### 📊 Analytics Dashboard
+
+- Student health metrics: completion rates, gap counts, score averages
+- Level and track distribution charts
+- Top performers and risk indicators
+- Section-level breakdowns and recent activity feed
+
+### 📸 Snapshot-Based Tracking
+
+- Every sync creates a point-in-time snapshot stored locally in SQLite
+- Content-addressable deduplication: identical data never creates a duplicate snapshot
+- Compare any two snapshots for field-level diff visualization (added / changed / removed)
+
+### 🤖 Agentic AI Assistant
+
+- Conversational AI interface powered by a local Ollama model (Qwen3, Llama3, Mistral, etc.)
+- **ReAct loop architecture** — the model reasons, selects a tool, executes it against your real data, then reasons again before answering
+- 8 typed tools: student history, snapshot comparison, declining/improving cohort analysis, dashboard metrics, student search, multi-condition field filtering, and pending operation creation
+- All SQL is generated by Rust from a closed enum of validated operators — **the LLM never writes SQL**
+
+### ✅ Human-in-the-Loop
+
+- AI write requests (score updates, flags, notes) are **never executed automatically**
+- Every proposed change becomes a `pending_operation` record requiring explicit user approval
+- Approval tray shows current value, proposed value, and the AI's reasoning
+- Full audit trail stored in SQLite
+
+### 🔒 Privacy by Design
+
+- Ollama endpoint is validated to be `localhost` only — student data cannot leave the device
+- Google Sheets access is read-only (`spreadsheets.readonly` OAuth scope)
+- OAuth refresh tokens are stored locally in `auth.json` inside the app data directory
+
+### 📄 Reports
+
+- Build print-ready HTML progress reports: select snapshots, students, and fields
+- Print or save as PDF via the system print dialog
+- Export to `.xlsx` via `rust_xlsxwriter`
+- Backend support for exporting to a new Google Sheet
+
+### 🔄 Google Sheets Sync
+
+- Authenticate once with Google OAuth — refresh tokens persist silently
+- Background auto-sync polls every 45 seconds and emits a Tauri event when data changes
+- Webhook trigger on `POST http://127.0.0.1:19291/sync-trigger` for external automation (e.g., Google Apps Script)
+- Hash-based change detection skips snapshot creation when data is unchanged
+
+---
+
+## Architecture
+
+```mermaid
+graph TD
+    A["React 19 Frontend\n(TypeScript · TailwindCSS · Recharts)"]
+    B["Tauri IPC Bridge\n(invoke / emit)"]
+    C["Rust Backend\n(Tokio async · commands.rs)"]
+    D["SQLite Database\n(WAL mode · foreign keys · SQLx migrations)"]
+    E["Ollama Local AI\n(HTTP · localhost only)"]
+    F["Google Sheets API\n(OAuth 2.0 read-only)"]
+    G["Sync Worker\n(45s polling background task)"]
+    H["Webhook Listener\n(tiny_http on :19291)"]
+
+    A -->|"invoke(command)"| B
+    B --> C
+    C --> D
+    C -->|"JSON chat API"| E
+    C -->|"Sheets API v4"| F
+    G --> C
+    H --> C
+    C -->|"emit(sync:updated)"| B
+    B --> A
 ```
 
-### Students
+### Layer Explanations
 
-Filterable student workspace with status badges, level indicators, score/category filters, column controls, and quick navigation into comparisons.
+| Layer             | Technology                              | Responsibility                                                                |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| **Frontend**      | React 19, Vite, TypeScript, TailwindCSS | UI, routing, chart rendering, AI chat panel                                   |
+| **IPC Bridge**    | Tauri 2 `invoke` / `emit`               | Type-safe serialized calls between webview and Rust                           |
+| **Rust Backend**  | Tokio, SQLx, reqwest                    | All business logic, data persistence, OAuth, sync, agent loop                 |
+| **Database**      | SQLite (WAL mode)                       | Local persistence: students, fields, snapshots, AI conversations, audit trail |
+| **Local AI**      | Ollama HTTP API                         | LLM inference — always localhost, never a remote endpoint                     |
+| **Google Sheets** | Sheets API v4, OAuth2                   | Read-only data source — synced into SQLite snapshots                          |
+| **Sync Worker**   | Tokio background task                   | Polls sheets on a 45s interval, hash-detects changes                          |
+| **Webhook**       | `tiny_http` TCP listener                | External trigger port for automation (e.g., Apps Script push)                 |
 
-```md
-![Students](./docs/images/students.png)
+---
+
+## Agent Architecture
+
+ProgressLens implements a **ReAct (Reason + Act) agentic loop** entirely in Rust.
+
+```mermaid
+flowchart TD
+    U["User Message"]
+    SYS["System Prompt + Dataset Context\n+ Tool Schemas + Conversation History"]
+    LLM["Ollama LLM\n(local inference)"]
+    PARSE["Parse JSON Directive"]
+    GUARD["Grounding Guard\nFactual answer without tool evidence?"]
+    TOOL["Tool Dispatch\nagent_tools::execute()"]
+    VALIDATE["Argument Validation\nRust enforces types, ranges, field existence"]
+    SQL["Parameterized SQL\nclosed operator enum — no LLM-written SQL"]
+    DB["SQLite"]
+    OBS["Tool Result Observation\nFormatted as human-readable context"]
+    PENDING["create_pending_operation\nAI proposes, never executes"]
+    FINAL["Final Response\ngrounded in tool data only"]
+    HITL["Human-in-the-Loop\nApproval Tray"]
+
+    U --> SYS --> LLM --> PARSE
+    PARSE -->|tool_call| GUARD
+    PARSE -->|final_response| GUARD
+    GUARD -->|"ungrounded retry"| LLM
+    GUARD -->|ok| TOOL
+    TOOL --> VALIDATE --> SQL --> DB --> OBS --> LLM
+    TOOL -->|write request| PENDING --> HITL
+    GUARD -->|"grounded answer"| FINAL
 ```
 
-### Compare
+### Agent Loop Steps
 
-Snapshot comparison workspace for viewing student-level and field-level changes over time.
+| Step                    | Description                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **System prompt**       | Hard rules (no fabrication, no raw SQL, localhost-only), output format contract, tool selection guide, few-shot examples                 |
+| **Dataset context**     | Sheet name, snapshot ID, and every field key + label + type — injected fresh on each request                                             |
+| **LLM call**            | Ollama `/api/chat` with `temperature: 0.0` (deterministic), `format: "json"` (structured output)                                         |
+| **JSON parse**          | Response is parsed into a `ModelDirective` enum (`ToolCall` or `FinalResponse`)                                                          |
+| **Grounding guard**     | If the model attempts a factual final answer without calling any tool first, it is retried with a correction prompt                      |
+| **Tool dispatch**       | Tool name is matched against a closed list in Rust — unknown tool names are rejected                                                     |
+| **Argument validation** | All arguments are validated in Rust: type checks, length bounds, field key existence in DB                                               |
+| **SQL execution**       | Parameterized queries only. For `filter_students_by_field`, operators come from a closed Rust enum — the LLM cannot inject SQL fragments |
+| **Observation**         | Tool result is formatted as human-readable text (not raw JSON) to reduce token noise                                                     |
+| **Write request**       | Any change request creates a `pending_operation` row — no data is modified                                                               |
+| **Final response**      | Must be grounded in tool-returned data. Raw JSON and markdown are stripped before display                                                |
 
-```md
-![Compare](./docs/images/compare.png)
+---
+
+## Human-in-the-Loop Workflow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Chat as AI Chat Panel
+    participant Agent as Rust Agent Loop
+    participant DB as SQLite
+    participant Tray as Approval Tray
+
+    User->>Chat: "Update Rahul's coding score to 85"
+    Chat->>Agent: agent_ask(message, sheet_id, snapshot_id)
+    Agent->>DB: search_students("Rahul") → student_id=47
+    Agent->>DB: INSERT INTO agent_operations (kind=student_update, status=pending, expires_at=+15min)
+    Agent->>DB: INSERT INTO audit_events (event_type=operation_proposed, actor=local_ai)
+    Agent-->>Chat: "A pending operation has been created. No data has changed."
+    Chat-->>User: Shows confirmation message
+
+    User->>Tray: Opens Approval Tray
+    Tray->>DB: SELECT FROM agent_operations WHERE status=pending
+    DB-->>Tray: Shows current value, proposed value, AI reasoning
+
+    alt User Approves
+        User->>Tray: Click Approve
+        Tray->>DB: UPDATE student_values SET value=85
+        Tray->>DB: UPDATE agent_operations SET status=executed
+        Tray->>DB: INSERT INTO audit_events (event_type=operation_executed, actor=user)
+    else User Rejects
+        User->>Tray: Click Reject
+        Tray->>DB: UPDATE agent_operations SET status=cancelled
+    end
 ```
 
-### Reports
+---
 
-Report builder for selecting snapshots, students, fields, summaries, and progress notes before printing or exporting.
+## Snapshot Workflow
 
-```md
-![Reports](./docs/images/reports.png)
+```mermaid
+flowchart LR
+    GS["Google Sheets API"]
+    HASH["Hash raw API response\nDefaultHasher"]
+    COMP["Compare canonical\nSnapshotContent structs\nBTreeMap for order-independence"]
+    SKIP["Return existing snapshot_id\nno duplicate written"]
+    TX["SQLite Transaction\nUpsert fields\nInsert snapshot\nInsert student_values"]
+    SNAP["New Snapshot Stored"]
+    DASH["Dashboard and Students\nrefreshed via sync:updated event"]
+
+    GS --> HASH
+    HASH -->|"hash unchanged"| SKIP
+    HASH -->|"hash changed"| COMP
+    COMP -->|"content identical"| SKIP
+    COMP -->|"content differs"| TX --> SNAP --> DASH
 ```
 
-### Fields
+**Key design decisions:**
 
-Column setup workspace for configuring how imported spreadsheet columns should be interpreted and displayed.
+- Two-stage deduplication: fast hash check first, then deep structural equality
+- `BTreeMap` (sorted) comparison makes row ordering in the sheet irrelevant
+- A `Mutex`-guarded save path prevents two concurrent sync triggers from inserting identical content
+- All inserts are in a single SQLite transaction — partial failures leave no orphaned data
 
-```md
-![Fields](./docs/images/fields.png)
-```
+---
 
 ## Tech Stack
 
-### Frontend
+| Category               | Technology                                                         |
+| ---------------------- | ------------------------------------------------------------------ |
+| **Frontend**           | React 19, TypeScript, Vite 7, TailwindCSS 3, React Router 6        |
+| **Charts**             | Recharts 3                                                         |
+| **Icons**              | Lucide React                                                       |
+| **Desktop Runtime**    | Tauri 2                                                            |
+| **Backend Language**   | Rust (Edition 2021)                                                |
+| **Async Runtime**      | Tokio                                                              |
+| **Database**           | SQLite via SQLx 0.8 (WAL mode, typed queries, embedded migrations) |
+| **Local AI**           | Ollama (any compatible model: Qwen3, Llama3, Mistral, etc.)        |
+| **HTTP Client**        | reqwest 0.12                                                       |
+| **Authentication**     | Google OAuth 2.0 via `oauth2` crate                                |
+| **Spreadsheet Source** | Google Sheets API v4                                               |
+| **Excel Export**       | rust_xlsxwriter                                                    |
+| **Webhook Server**     | tiny_http                                                          |
+| **Date Utilities**     | date-fns, chrono                                                   |
 
-- React 19
-- TypeScript
-- Vite
-- TailwindCSS
-- React Router
-- Recharts
-- Lucide React
-- Tauri JavaScript API
+---
 
-### Desktop and Backend
-
-- Tauri 2
-- Rust
-- SQLite
-- SQLx
-- Tokio
-- Google OAuth2
-- Google Sheets API
-- rust_xlsxwriter
-- tiny_http webhook listener
-
-## Project Structure
-
-```text
-ProgressLens/
-|-- public/                 Static assets
-|-- src/                    React frontend
-|   |-- api.ts              Typed Tauri invoke wrappers
-|   |-- types.ts            Shared frontend types
-|   |-- components/         App layout components
-|   `-- pages/              Dashboard, Students, Compare, Reports, Fields
-|-- src-tauri/              Tauri/Rust backend
-|   |-- migrations/         SQLite migrations
-|   `-- src/
-|       |-- auth.rs         Google OAuth flow
-|       |-- commands.rs     Tauri command handlers
-|       |-- db.rs           SQLite initialization
-|       |-- diff.rs         Snapshot diff logic
-|       |-- export.rs       Excel and Google Sheets export
-|       |-- sheets.rs       Google Sheets fetch/parse logic
-|       |-- snapshot.rs     Snapshot persistence
-|       |-- sync_worker.rs  Background auto-sync
-|       `-- webhook.rs      Local sync trigger server
-`-- package.json
-```
-
-## Getting Started
+## Installation
 
 ### Prerequisites
 
-Install:
+| Requirement                                                   | Version | Notes                         |
+| ------------------------------------------------------------- | ------- | ----------------------------- |
+| [Node.js](https://nodejs.org)                                 | 20+     | LTS recommended               |
+| [Rust](https://rustup.rs)                                     | stable  | `rustup update stable`        |
+| [Tauri prerequisites](https://tauri.app/start/prerequisites/) | —       | Platform-specific system deps |
+| [Ollama](https://ollama.com/download)                         | latest  | For the AI assistant feature  |
+| Google Cloud project                                          | —       | For Google Sheets sync        |
 
-- Node.js
-- npm
-- Rust
-- Tauri system dependencies for your platform
+---
 
-For Tauri setup, see the official Tauri prerequisites for your operating system.
+### 1. Clone the Repository
 
-### Install Dependencies
+```bash
+git clone https://github.com/YOUR_USERNAME/ProgressLens.git
+cd ProgressLens
+```
+
+### 2. Install Node Dependencies
 
 ```bash
 npm install
 ```
 
-### Run Frontend Only
+### 3. Configure Google OAuth Credentials
+
+ProgressLens reads OAuth credentials from **environment variables at build time**.
+
+**Step 1 — Create a Google Cloud project**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a new project (or select an existing one)
+3. Enable the **Google Sheets API** under _APIs & Services → Library_
+
+**Step 2 — Create OAuth credentials**
+
+1. Go to _APIs & Services → Credentials_
+2. Click **Create Credentials → OAuth 2.0 Client ID**
+3. Application type: **Desktop app**
+4. Add `http://localhost:8080` as an **Authorized Redirect URI**
+5. Note your **Client ID** and **Client Secret**
+
+**Step 3 — Set build-time environment variables**
+
+Edit `src-tauri/.cargo/config.toml` and fill in your credentials:
+
+```toml
+[env]
+GOOGLE_CLIENT_ID     = "your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET = "GOCSPX-your-client-secret"
+```
+
+> `src-tauri/.cargo/config.toml` is listed in `.gitignore` — your credentials stay local.
+
+---
+
+### 4. Install and Configure Ollama _(Optional — AI Assistant)_
 
 ```bash
-npm run dev
+# Pull a recommended model (8B fits comfortably on 8GB VRAM)
+ollama pull qwen3:8b
+
+# Verify Ollama is running
+ollama list
 ```
 
-The Vite dev server runs on:
+Ollama must be running when you launch ProgressLens. The AI Settings panel lets you configure the endpoint (default `http://localhost:11434`) and model name.
 
-```text
-http://localhost:1420
-```
+> ProgressLens enforces that the Ollama endpoint is always `localhost`. This is a deliberate
+> privacy boundary — student data cannot be sent to any remote AI service.
 
-### Run Desktop App
+---
+
+### 5. Run in Development Mode
 
 ```bash
 npm run tauri dev
 ```
 
-### Build Frontend
-
-```bash
-npm run build
-```
-
-### Build Desktop App
+### 6. Build for Production
 
 ```bash
 npm run tauri build
 ```
 
-## Google Sheets Setup
+The packaged installer will be in `src-tauri/target/release/bundle/`.
 
-ProgressLens uses Google OAuth and the Google Sheets API to read spreadsheet data.
+---
 
-Expected sheet format:
+## Screenshots
 
-- First row contains column headers.
-- Rows after the header contain student records.
-- The app auto-detects identity columns such as name, roll number, or USN.
-- Additional columns can be configured after import.
+> Screenshots coming soon.
 
-Recommended column types:
+| Screen                  | Description                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| **Dashboard**           | Academic command center — health metrics, level distribution, recent changes, top performers |
+| **Students**            | Filterable student workspace — status badges, multi-field filters, column controls           |
+| **AI Assistant**        | Conversational analytics — natural language queries powered by local Ollama model            |
+| **Approval Tray**       | Human-in-the-loop — review, approve, or reject AI-proposed changes                           |
+| **Snapshot Comparison** | Point-in-time diff — field-level changes per student across any two syncs                    |
 
-- Student name
-- Roll number or USN
-- Section
-- Score fields
-- Level-track fields
-- Categorical fields
-- Submission links
-- Notes or text fields
+---
 
-## Data Model
+## Project Structure
 
-ProgressLens stores synced data locally in SQLite.
-
-Main entities:
-
-- `sheets`: linked Google Sheets
-- `students`: student identity records
-- `fields`: imported and configured columns
-- `snapshots`: each sync event
-- `student_values`: field values for each student in each snapshot
-
-This model makes historical comparisons possible without relying on old spreadsheet versions.
-
-## Sync Behavior
-
-The app supports three sync paths:
-
-- Manual sheet sync from the UI
-- Background auto-sync every 45 seconds
-- Local webhook trigger on:
-
-```text
-POST http://127.0.0.1:19291/sync-trigger
+```
+ProgressLens/
+├── src/                        React frontend
+│   ├── api.ts                  Typed Tauri invoke() wrappers
+│   ├── types.ts                Shared TypeScript types
+│   ├── components/
+│   │   ├── AssistantPanel.tsx  AI chat interface + approval tray
+│   │   └── Layout.tsx          App shell, navigation, sidebar
+│   └── pages/
+│       ├── Dashboard.tsx       Analytics command center
+│       ├── Students.tsx        Filterable student explorer
+│       ├── Diff.tsx            Snapshot comparison view
+│       ├── Report.tsx          Report builder
+│       └── FieldSetup.tsx      Column type configuration
+├── src-tauri/
+│   ├── migrations/             SQLx embedded SQL migrations (0001–0008)
+│   └── src/
+│       ├── agent.rs            ReAct agentic loop, conversation management
+│       ├── agent_tools.rs      Tool definitions, dispatch, SQL execution
+│       ├── auth.rs             Google OAuth2 flow + refresh token persistence
+│       ├── commands.rs         Tauri invoke command handlers
+│       ├── db.rs               SQLite connection pool + migration runner
+│       ├── diff.rs             Snapshot diff computation
+│       ├── export.rs           Excel + Google Sheets export
+│       ├── lib.rs              Tauri app entry point
+│       ├── models.rs           Serde-serializable data types
+│       ├── ollama.rs           Ollama HTTP client + localhost enforcement
+│       ├── operations.rs       Pending operation helpers
+│       ├── sheets.rs           Google Sheets API fetch + parse
+│       ├── snapshot.rs         Content-addressable snapshot persistence
+│       ├── sync_worker.rs      Background 45s polling task
+│       └── webhook.rs          Local sync trigger HTTP listener
+└── docs/                       Extended documentation
+    ├── architecture.md
+    ├── agent.md
+    ├── database.md
+    ├── snapshot-system.md
+    ├── tool-calling.md
+    └── security.md
 ```
 
-The background sync worker hashes raw Google Sheets responses and only stores a new snapshot when data changes, unless a force sync is requested.
-
-## Exports and Reports
-
-ProgressLens can:
-
-- Generate HTML reports for preview and printing
-- Print or save reports as PDF through the system print flow
-- Export selected report data to Excel
-- Export the current student view to Excel
-- Create Google Sheets reports from the backend export command
-
-Exported Excel files are saved to the user's Downloads folder.
-
-## Development Notes
-
-Useful commands:
-
-```bash
-npm run dev
-npm run build
-npm run tauri dev
-npm run tauri build
-```
-
-The frontend communicates with Rust through typed wrappers in:
-
-```text
-src/api.ts
-```
-
-Most backend operations are exposed as Tauri commands from:
-
-```text
-src-tauri/src/commands.rs
-src-tauri/src/export.rs
-```
-
-## Current Status
-
-ProgressLens is currently an active desktop app prototype with working sync, local persistence, analytics views, snapshot comparison, report generation, and exports.
-
-Planned polish areas:
-
-- Add product screenshots to this README
-- Improve onboarding for first-time Google Sheets setup
-- Expose Google Sheets export in the report UI
-- Add more formal test coverage
-- Continue refining the premium desktop analytics interface
+---
 
 ## License
 
-No license has been specified yet.
+[MIT](LICENSE) — © 2024 ProgressLens Contributors
