@@ -355,15 +355,27 @@ The packaged installer will be in `src-tauri/target/release/bundle/`.
 
 ## Screenshots
 
-> Screenshots coming soon.
+### Student workspace
 
-| Screen                  | Description                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| **Dashboard**           | Academic command center — health metrics, level distribution, recent changes, top performers |
-| **Students**            | Filterable student workspace — status badges, multi-field filters, column controls           |
-| **AI Assistant**        | Conversational analytics — natural language queries powered by local Ollama model            |
-| **Approval Tray**       | Human-in-the-loop — review, approve, or reject AI-proposed changes                           |
-| **Snapshot Comparison** | Point-in-time diff — field-level changes per student across any two syncs                    |
+Filter a linked dataset by completion status, track level, section, CGPA, marks, and other configured fields. Active filters are shown as removable chips, while the table keeps student progress and risk status visible at a glance.
+
+![ProgressLens student workspace showing filters, active filter chips, and student progress rows](docs/images/students-workspace.png)
+
+### Local AI assistant
+
+Ask plain-language questions about the selected dataset and its snapshots. The assistant suggests common analyses—such as finding declining or improving students—and runs through local Ollama; data-change requests remain pending until a user reviews and approves them.
+
+<p align="center">
+  <img src="docs/images/local-ai-assistant.png" alt="ProgressLens AI assistant with snapshot-analysis prompts" width="360" />
+</p>
+
+| Screen | What it provides |
+| --- | --- |
+| **Dashboard** | Academic health metrics, level distribution, recent changes, and top performers. |
+| **Students** | Filterable student workspace with status badges, field controls, and Excel export. |
+| **Snapshot comparison** | Point-in-time, field-level changes for each student between any two syncs. |
+| **Reports** | Print-ready progress reports, with PDF printing and spreadsheet export. |
+| **AI assistant** | Grounded local-Ollama analytics, tool-assisted queries, and approval-gated change proposals. |
 
 ---
 
